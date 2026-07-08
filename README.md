@@ -1,18 +1,18 @@
 # yt-music-mcp
 
-MCP server + listening history tracker para [th-ch/youtube-music](https://github.com/th-ch/youtube-music).
+MCP server + listening history tracker for [th-ch/youtube-music](https://github.com/th-ch/youtube-music).
 
-Controlá YouTube Music desde opencode, Claude, o cualquier cliente MCP. Reproducí canciones, creá mixes, consultá estadísticas de escucha, y recibí recomendaciones basadas en tu historial real.
+Control YouTube Music from opencode, Claude Desktop, or any MCP client. Play songs, create mixes, query listening stats, and get recommendations based on your actual listening history.
 
 ---
 
-## Requisito
+## Prerequisite
 
-**th-ch/youtube-music** con el plugin **api-server** activado.
+**th-ch/youtube-music** with the **api-server** plugin enabled.
 
-El api-server expone un HTTP API en `http://0.0.0.0:26538` (por defecto). Sin esto, el MCP server no puede conectarse.
+The api-server exposes an HTTP API at `http://0.0.0.0:26538` (default). The MCP server cannot connect without it.
 
-En la UI de YT Music: `Plugins → api-server → enabled`. Si no aparece, agregalo en `config.json`:
+From the YT Music UI: `Plugins → api-server → enabled`. Or add it in `config.json`:
 
 ```json
 "plugins": {
@@ -25,24 +25,24 @@ En la UI de YT Music: `Plugins → api-server → enabled`. Si no aparece, agreg
 
 ---
 
-## Instalación
+## Installation
 
 ```bash
-git clone https://github.com/tuusuario/yt-music-mcp
+git clone https://github.com/DiegoPtit/yt-music-mcp
 cd yt-music-mcp
 npm install
 ```
 
-### Registrar en opencode
+### Register with opencode
 
-Agregá esto a `~/.config/opencode/opencode.json`:
+Add this to `~/.config/opencode/opencode.json`:
 
 ```json
 {
   "mcp": {
     "yt-music": {
       "type": "local",
-      "command": ["node", "/ruta/a/yt-music-mcp/mcp-server.js"],
+      "command": ["node", "/path/to/yt-music-mcp/mcp-server.js"],
       "enabled": true,
       "timeout": 15000
     }
@@ -50,75 +50,75 @@ Agregá esto a `~/.config/opencode/opencode.json`:
 }
 ```
 
-Para otros clientes MCP (Claude Desktop, etc.), configurá el comando `node /ruta/a/yt-music-mcp/mcp-server.js`.
+For other MCP clients (Claude Desktop, etc.), configure the command `node /path/to/yt-music-mcp/mcp-server.js`.
 
 ---
 
-## Tools del MCP Server
+## MCP Server Tools
 
-### Reproducción
+### Playback
 
-| Tool | Descripción |
+| Tool | Description |
 |------|-------------|
-| `ytm_now` | Canción actual: título, artista, álbum, progreso, like |
-| `ytm_play_pause` | Pausar / reanudar |
-| `ytm_next` | Siguiente tema |
-| `ytm_previous` | Tema anterior |
-| `ytm_play_song` | Reproducir por `videoId` o por `query` (búsqueda + play) |
-| `ytm_mix` | Crear mix: limpiar cola, tocar 1ra, encolar resto en orden |
-| `ytm_playlist_start` | Iniciar playlist/radio por `videoId` o `query` |
-| `ytm_seek` | Adelantar/retroceder (segundos) |
-| `ytm_volume` | Volumen 0–100 |
+| `ytm_now` | Current song: title, artist, album, progress, like state |
+| `ytm_play_pause` | Toggle play/pause |
+| `ytm_next` | Next track |
+| `ytm_previous` | Previous track |
+| `ytm_play_song` | Play by `videoId` or by `query` (search + play) |
+| `ytm_mix` | Create a mix: clear queue, play first song, queue the rest in order |
+| `ytm_playlist_start` | Start a playlist/radio by `videoId` or `query` |
+| `ytm_seek` | Seek to position (seconds) |
+| `ytm_volume` | Volume 0–100 |
 
-### Cola
+### Queue
 
-| Tool | Descripción |
+| Tool | Description |
 |------|-------------|
-| `ytm_queue` | Ver cola actual |
-| `ytm_queue_add` | Agregar canción (`position`: `end` o `next`) |
-| `ytm_queue_clear` | Vaciar cola |
+| `ytm_queue` | View current queue |
+| `ytm_queue_add` | Add song to queue (`position`: `end` or `next`) |
+| `ytm_queue_clear` | Clear the queue |
 
-### Interacción
+### Interaction
 
-| Tool | Descripción |
+| Tool | Description |
 |------|-------------|
-| `ytm_like` | Dar like |
-| `ytm_dislike` | Dar dislike |
-| `ytm_search` | Buscar canciones, álbumes, playlists |
+| `ytm_like` | Like the current song |
+| `ytm_dislike` | Dislike the current song |
+| `ytm_search` | Search for songs, albums, playlists |
 
-### Historial y Stats
+### History & Stats
 
-| Tool | Descripción |
+| Tool | Description |
 |------|-------------|
-| `ytm_history` | Historial de escucha (filtrable: `recent`, `plays`, `liked`) |
-| `ytm_stats` | Estadísticas: canciones totales, géneros, top artists |
-| `ytm_recommend` | Recomendaciones basadas en tu historial real |
+| `ytm_history` | Listening history (sortable: `recent`, `plays`, `liked`) |
+| `ytm_stats` | Statistics: total songs, genres, top artists |
+| `ytm_recommend` | Recommendations based on your actual listening history |
 
 ---
 
 ## Listening History Tracker
 
-`tracker.js` se conecta al api-server de YT Music y registra automáticamente cada canción que supera el **45%** de reproducción.
+`tracker.js` connects to the YT Music api-server and automatically records every song that exceeds **45%** playback.
 
-### Trackea por canción:
+### Per-song data tracked:
 
 - `title`, `artist`, `album`, `duration`
-- `genre` (resuelto via: mapa local → MusicBrainz → InnerTube → cache)
+- `genre` (resolved via: local map → MusicBrainz → InnerTube → cache)
 - `likeState` (LIKE / DISLIKE / INDIFFERENT)
 - `playCount`, `timesCompleted`
-- `listenDates[]` con timestamp de cada vez que pasó el umbral
-- Clasificación por fecha (`byDate`)
+- `listenDates[]` with timestamps for each threshold crossing
+- Date-based classification (`byDate`)
 
-### Para activarlo:
-
-```bash
-systemctl --user enable --now $(pwd)/systemd/yt-music-history.service
-```
-
-O directamente:
+### Start the tracker:
 
 ```bash
 node tracker.js
+```
+
+Or as a systemd user service:
+
+```bash
+systemctl --user enable --now $(pwd)/systemd/yt-music-history.service
 ```
 
 ---
@@ -126,50 +126,50 @@ node tracker.js
 ## CLI: `yt-history`
 
 ```bash
-yt-history stats          # Estadísticas generales
-yt-history list           # Canciones ordenadas por fecha
-yt-history list plays     # Canciones ordenadas por reproducciones
-yt-history top 10         # Top 10 más escuchadas
-yt-history genres         # Desglose por género
-yt-history search <q>     # Buscar en el historial
-yt-history date YYYY-MM-DD  # Canciones de una fecha
-yt-history watch          # Monitor en tiempo real
-yt-history export         # JSON completo
+yt-history stats          # General statistics
+yt-history list           # Songs sorted by date
+yt-history list plays     # Songs sorted by play count
+yt-history top 10         # Top 10 most played
+yt-history genres         # Genre breakdown
+yt-history search <q>     # Search history
+yt-history date YYYY-MM-DD  # Songs from a specific date
+yt-history watch          # Real-time monitor
+yt-history export         # Full JSON export
 ```
 
 ---
 
 ## Mix Workflow
 
-El secreto para crear mixes que suenen en orden: `ytm_mix` usa el workflow descubierto empíricamente:
+`ytm_mix` implements the empirically discovered workflow for creating properly ordered mixes:
 
-1. Limpia la cola
-2. Reproduce la primera canción
-3. Encola el resto con `position=next` en **orden inverso**
+1. Clear the queue
+2. Play the first song
+3. Queue remaining songs with `position=next` in **reverse order**
 
-Cada `queue_add` con `position=next` inserta justo después del tema actual. Insertando de atrás para adelante quedan en el orden correcto.
+Each `queue_add` with `position=next` inserts immediately after the current track. By inserting from last to first, the final queue order matches the requested order.
 
 ---
 
-## Arquitectura
+## Architecture
 
 ```
 th-ch/youtube-music (api-server :26538)
         │
         ├── tracker.js ───→ listening-history.json
         │
-        └── mcp-server.js ──→ opencode / Claude / cualquier cliente MCP
+        └── mcp-server.js ──→ opencode / Claude / any MCP client
                                   │
                                   └── yt-history.js (CLI)
 ```
 
-El tracker y el MCP server son independientes. Podés usar solo el MCP sin tracker, o solo el tracker sin MCP.
+The tracker and MCP server are independent. Use either one or both.
 
 ---
 
-## ¿Por qué este repo?
+## Why this repo?
 
-- **Basado en la API nativa** de th-ch/youtube-music, no en scrapers frágiles
-- **Recomendaciones con contexto real**: usa tu historial de escucha, no genéricas
-- **Mix exacto**: el workflow `ytm_mix` garantiza el orden que pediste
-- **Dual**: funciona como MCP server para IA y como CLI para humanos
+- **Native API integration**: communicates with th-ch/youtube-music's built-in API server, no fragile scraping
+- **Real listening context**: recommendations use your actual history, not generic charts
+- **Exact mix ordering**: `ytm_mix` guarantees songs play in the order you specify
+- **Dual purpose**: works as an MCP server for AI agents and as a CLI for humans
