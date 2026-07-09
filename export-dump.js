@@ -4,31 +4,83 @@ const db = require('./db');
 const fs = require('fs');
 const path = require('path');
 
-const DEST = path.join(process.env.HOME, 'Descargas', `yt-music-history-${new Date().toISOString().split('T')[0]}.json`);
+function parseRange() {
+  const args = process.argv.slice(2);
+  const now = new Date();
+  let startDate, endDate = now.toISOString().split('T')[0];
+  let label = 'all-time';
 
-const songs = db.getAllSongs();
-const listenDates = db.getDb().prepare('SELECT * FROM listen_dates ORDER BY listenedAt').all();
+  if (args[0] === ':today') {
+    startDate = endDate;
+    label = 'today';
+  } else if (args[0] === ':day') {
+    const n = parseInt(args[1]) || 0;
+    const d = new Date(now); d.setDate(d.getDate() - n);
+    startDate = d.toISOString().split('T')[0];
+    label = n === 0 ? 'today' : `last-${n}-days`;
+  } else if (args[0] === ':week') {
+    const n = parseInt(args[1]) || 0;
+    const d = new Date(now); d.setDate(d.getDate() - n * 7);
+    startDate = d.toISOString().split('T')[0];
+    label = n === 0 ? 'this-week' : `last-${n}-weeks`;
+  } else if (args[0] === ':month') {
+    const n = parseInt(args[1]) || 0;
+    const d = new Date(now); d.setMonth(d.getMonth() - n);
+    startDate = d.toISOString().split('T')[0];
+    label = n === 0 ? 'this-month' : `last-${n}-months`;
+  } else {
+    startDate = null;
+  }
+
+  return { startDate, endDate, label };
+}
+
+const { startDate: rangeStart, endDate: rangeEnd, label } = parseRange();
+
+function fetchSongs() {
+  if (!rangeStart) return db.getAllSongs();
+  const rows = db.getDb().prepare(`
+    SELECT s.*, COUNT(ld.id) as playsInPeriod, MAX(ld.listenedAt) as lastInPeriod
+    FROM songs s
+    JOIN listen_dates ld ON s.videoId = ld.videoId
+    WHERE DATE(ld.listenedAt) >= ? AND DATE(ld.listenedAt) <= ?
+    GROUP BY s.videoId ORDER BY playsInPeriod DESC
+  `).all(rangeStart, rangeEnd);
+  return rows;
+}
+
+function fetchListenDates() {
+  if (!rangeStart) return db.getDb().prepare('SELECT * FROM listen_dates ORDER BY listenedAt').all();
+  return db.getDb().prepare('SELECT * FROM listen_dates WHERE DATE(listenedAt) >= ? AND DATE(listenedAt) <= ? ORDER BY listenedAt').all(rangeStart, rangeEnd);
+}
+
+const songs = fetchSongs();
+const listenDates = fetchListenDates();
 
 const artistMap = {};
 const genreMap = {};
 let totalDuration = 0;
+let totalListens = 0;
 
 for (const s of songs) {
-  if (!artistMap[s.artist]) artistMap[s.artist] = { artist: s.artist, songCount: 0, totalPlays: 0, totalDuration: 0, songs: [], firstListened: s.firstListened, lastListened: s.lastListened };
+  const plays = s.playsInPeriod || s.playCount;
+  totalListens += plays;
+
+  if (!artistMap[s.artist]) artistMap[s.artist] = { artist: s.artist, songCount: 0, totalPlays: 0, totalDuration: 0, songs: [], first: s.firstListened, last: s.lastListened };
   artistMap[s.artist].songCount++;
-  artistMap[s.artist].totalPlays += s.playCount;
-  artistMap[s.artist].totalDuration += (s.duration || 0) * s.playCount;
+  artistMap[s.artist].totalPlays += plays;
+  artistMap[s.artist].totalDuration += (s.duration || 0) * plays;
   if (s.firstListened < artistMap[s.artist].first) artistMap[s.artist].first = s.firstListened;
-  if (s.lastListened > artistMap[s.artist].last) artistMap[s.artist].last = s.lastListened;
+  if ((s.lastInPeriod || s.lastListened) > artistMap[s.artist].last) artistMap[s.artist].last = s.lastInPeriod || s.lastListened;
   artistMap[s.artist].songs.push(s.title);
 
   if (s.genre) {
     if (!genreMap[s.genre]) genreMap[s.genre] = { genre: s.genre, songCount: 0, totalPlays: 0 };
     genreMap[s.genre].songCount++;
-    genreMap[s.genre].totalPlays += s.playCount;
+    genreMap[s.genre].totalPlays += plays;
   }
 
-  totalDuration += (s.duration || 0) * s.playCount;
+  totalDuration += (s.duration || 0) * plays;
 }
 
 const topArtists = Object.values(artistMap).sort((a, b) => b.totalPlays - a.totalPlays);
@@ -72,23 +124,21 @@ const avgMood = (() => {
   };
 })();
 
+const DEST = path.join(process.env.HOME, 'Descargas', `yt-music-history-${label}-${new Date().toISOString().split('T')[0]}.json`);
+
 const dump = {
   meta: {
     exportedAt: new Date().toISOString(),
+    period: label,
+    ...(rangeStart ? { dateRange: { start: rangeStart, end: rangeEnd } } : { dateRange: { first: songs.length ? songs[songs.length - 1].firstListened : null, last: songs.length ? songs[0].lastListened : null } }),
     source: 'yt-music-mcp (th-ch/youtube-music tracker)',
     totalSongs: songs.length,
-    totalListens: songs.reduce((a, s) => a + s.playCount, 0),
+    totalListens,
     totalListeningTimeMinutes: Math.round(totalDuration / 60),
     daysWithActivity: Object.keys(dateDist).length,
     totalArtists: topArtists.length,
     totalGenres: topGenres.length,
-    dateRange: {
-      first: songs.length ? songs[songs.length - 1].firstListened : null,
-      last: songs.length ? songs[0].lastListened : null,
-    },
   },
-
-  moodProfile: avgMood,
 
   topArtistsOverall: topArtists.slice(0, 10).map(a => ({
     rank: topArtists.indexOf(a) + 1,
@@ -114,15 +164,10 @@ const dump = {
     durationSeconds: s.duration || null,
     genre: s.genre || null,
     bpm: s.bpm || null,
-    ...(s.energy != null ? {
-      mood: {
-        energy: s.energy,
-        danceability: s.danceability,
-        valence: s.valence,
-      }
-    } : {}),
+    ...(s.energy != null ? { mood: { energy: s.energy, danceability: s.danceability, valence: s.valence } } : {}),
     stats: {
       totalPlays: s.playCount,
+      ...(s.playsInPeriod ? { playsInPeriod: s.playsInPeriod } : {}),
       liked: s.likeState === 'LIKE',
       disliked: s.likeState === 'DISLIKE',
       maxProgressPercent: Math.round((s.maxProgress || 0) * 100),
@@ -130,6 +175,7 @@ const dump = {
     dates: {
       firstListened: s.firstListened,
       lastListened: s.lastListened,
+      ...(s.lastInPeriod ? { lastInPeriod: s.lastInPeriod } : {}),
     },
     youtubeId: s.videoId,
   })),
@@ -141,13 +187,7 @@ const dump = {
         hour: `${String(hour).padStart(2, '0')}:00`,
         plays: count,
         peak: count === Math.max(...Object.values(hourDist)),
-        label: (() => {
-          const h = parseInt(hour);
-          if (h < 6) return 'late night';
-          if (h < 12) return 'morning';
-          if (h < 18) return 'afternoon';
-          return 'evening';
-        })(),
+        label: (() => { const h = parseInt(hour); if (h < 6) return 'late night'; if (h < 12) return 'morning'; if (h < 18) return 'afternoon'; return 'evening'; })(),
       })),
     byDayOfWeek: Object.entries(dayDist).map(([day, count]) => ({ day, plays: count })),
     mostActiveDay: Object.entries(dateDist).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([date, plays]) => ({ date, plays })),
@@ -161,8 +201,10 @@ const dump = {
   },
 };
 
+if (avgMood) dump.moodProfile = avgMood;
+
 fs.writeFileSync(DEST, JSON.stringify(dump, null, 2));
 console.log(`Exported to ${DEST}`);
 console.log(`  ${dump.meta.totalSongs} songs · ${dump.meta.totalListens} listens · ${dump.meta.totalArtists} artists · ${dump.meta.totalGenres} genres`);
 if (dump.moodProfile) console.log(`  Mood profile: ${dump.moodProfile.moodLabel} (e:${dump.moodProfile.avgEnergy} d:${dump.moodProfile.avgDanceability} v:${dump.moodProfile.avgValence})`);
-console.log(`  ${dump.meta.totalListeningTimeMinutes} minutes · ${dump.meta.daysWithActivity} days`);
+console.log(`  ${dump.meta.totalListeningTimeMinutes} minutes over ${dump.meta.daysWithActivity} days`);
