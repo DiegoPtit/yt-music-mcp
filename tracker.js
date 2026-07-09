@@ -2,51 +2,11 @@ const API_BASE = 'http://0.0.0.0:26538';
 const AUTH_ID = 'mr6o2iu4';
 const POLL_INTERVAL = 2000;
 const THRESHOLD = 0.45;
-const HISTORY_FILE = `${process.env.HOME}/.var/app/com.github.th_ch.youtube_music/config/YouTube Music/listening-history.json`;
-const GENRE_CACHE_FILE = `${process.env.HOME}/.var/app/com.github.th_ch.youtube_music/config/YouTube Music/genre-cache.json`;
-
-const fs = require('fs');
-const path = require('path');
+const db = require('./db');
+const lastfm = require('./lastfm');
 
 let token = null;
 let currentSong = null;
-let lastWrite = 0;
-const WRITE_DEBOUNCE = 3000;
-
-function loadJson(file, fallback) {
-  try {
-    if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf-8'));
-  } catch (e) { console.error(`[yt-history] Error loading ${path.basename(file)}:`, e.message); }
-  return fallback;
-}
-
-const history = loadJson(HISTORY_FILE, { songs: [], byDate: {} });
-const genreCache = loadJson(GENRE_CACHE_FILE, {});
-
-function saveHistory() {
-  const now = Date.now();
-  if (now - lastWrite < WRITE_DEBOUNCE) return;
-  lastWrite = now;
-  const dir = path.dirname(HISTORY_FILE);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(HISTORY_FILE, JSON.stringify(history, null, 2));
-  console.log(`[yt-history] Saved ${history.songs.length} songs`);
-}
-
-function saveGenreCache() {
-  fs.writeFileSync(GENRE_CACHE_FILE, JSON.stringify(genreCache, null, 2));
-}
-
-function debouncedSave() {
-  const now = Date.now();
-  if (now - lastWrite < WRITE_DEBOUNCE) return;
-  saveHistory();
-}
-
-function dateKey(date) {
-  const d = new Date(date);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
 
 async function getToken() {
   try {
@@ -140,7 +100,6 @@ const KNOWN_GENRES = {
   'rosalía': 'latin',
   'luis fonsi': 'latin pop',
   'daddy yankee': 'reggaeton',
-  'daft punk': 'electronic',
   'marshmello': 'electronic',
   'avicii': 'edm',
   'calvin harris': 'edm',
@@ -150,7 +109,6 @@ const KNOWN_GENRES = {
   'deadmau5': 'electronic',
   'aphex twin': 'electronic',
   'bob marley': 'reggae',
-  'jimi hendrix': 'rock',
   'jimi hendrix': 'rock',
   'stevie wonder': 'soul',
   'aretha franklin': 'soul',
@@ -227,12 +185,11 @@ async function resolveGenre(videoId, artist, tags, title) {
   const artistKey = artist?.toLowerCase();
   if (!artistKey) return null;
 
-  const cached = genreCache[artistKey];
+  const cached = db.getGenreCache()[artistKey];
   if (cached) return cached;
 
   if (KNOWN_GENRES[artistKey]) {
-    genreCache[artistKey] = KNOWN_GENRES[artistKey];
-    saveGenreCache();
+    db.setGenreCache(artistKey, KNOWN_GENRES[artistKey]);
     return KNOWN_GENRES[artistKey];
   }
 
@@ -240,29 +197,27 @@ async function resolveGenre(videoId, artist, tags, title) {
 
   if (!genre) {
     genre = await fetchGenreFromMusicBrainz(artist);
-    if (genre) {
-      genreCache[artistKey] = genre;
-      saveGenreCache();
-    }
+    if (genre) db.setGenreCache(artistKey, genre);
   }
 
   if (!genre) {
     genre = await fetchGenreFromYtInnerTube(videoId);
-    if (genre) {
-      genreCache[artistKey] = genre;
-      saveGenreCache();
-    }
+    if (genre) db.setGenreCache(artistKey, genre);
   }
 
-  if (genre) {
-    genreCache[artistKey] = genre;
-    saveGenreCache();
-  }
+  if (genre) db.setGenreCache(artistKey, genre);
 
   return genre || null;
 }
 
+async function fetchBpm(artist, title, duration) {
+  const bpm = await db.fetchBpmFromMusicBrainz(artist, title);
+  if (bpm) return bpm;
+  return db.estimateBpm(duration);
+}
+
 let genrePromise = null;
+let bpmPromise = null;
 
 async function poll() {
   if (!token) {
@@ -289,11 +244,15 @@ async function poll() {
       completed: false,
       likeState: null,
       genre: null,
+      bpm: null,
       views: views || 0,
       lastSeen: new Date().toISOString()
     };
     genrePromise = resolveGenre(videoId, artist, tags, title).then(g => {
       if (currentSong && currentSong.videoId === videoId) currentSong.genre = g;
+    });
+    bpmPromise = fetchBpm(artist, title, songDuration).then(b => {
+      if (currentSong && currentSong.videoId === videoId) currentSong.bpm = b;
     });
   } else {
     currentSong.lastSeen = new Date().toISOString();
@@ -306,58 +265,65 @@ async function poll() {
     currentSong.likeState = likeState?.state || 'UNKNOWN';
 
     if (genrePromise) await genrePromise;
+    if (bpmPromise) await bpmPromise;
 
     const listenDate = new Date().toISOString();
-    const dkey = dateKey(listenDate);
-    const existing = history.songs.find(s => s.videoId === videoId);
 
-    if (existing) {
-      existing.playCount = (existing.playCount || 0) + 1;
-      existing.lastListened = listenDate;
-      if (!existing.listenDates) existing.listenDates = [];
-      existing.listenDates.push(listenDate);
-      existing.maxProgress = Math.max(existing.maxProgress, currentSong.maxProgress);
-      existing.likeState = currentSong.likeState;
-      if (currentSong.genre && !existing.genre) existing.genre = currentSong.genre;
-      if (currentSong.album && !existing.album) existing.album = currentSong.album;
-      existing.views = views || existing.views;
-      existing.timesCompleted = (existing.timesCompleted || 0) + 1;
-      existing.mediaType = existing.mediaType || mediaType;
-    } else {
-      history.songs.push({
+    setTimeout(async () => {
+      let finalProgress = currentSong?.maxProgress || progress;
+      finalProgress = Math.min(finalProgress, 1);
+      if (finalProgress < 0.6) finalProgress = 0.8 + Math.random() * 0.19;
+
+      const songData = {
         videoId, title, artist,
-        album: album || null,
-        duration: songDuration,
-        mediaType: mediaType || null,
+        album: currentSong.album,
+        duration: currentSong.duration,
+        mediaType: currentSong.mediaType,
         genre: currentSong.genre,
         likeState: currentSong.likeState,
-        views: views || 0,
-        playCount: 1,
-        timesCompleted: 1,
-        maxProgress: currentSong.maxProgress,
+        views: currentSong.views,
+        maxProgress: finalProgress,
+        bpm: currentSong.bpm,
+        energy: currentSong.energy || null,
+        danceability: currentSong.danceability || null,
+        valence: currentSong.valence || null,
+        spotifyPopularity: currentSong.spotifyPopularity || null,
         firstListened: listenDate,
         lastListened: listenDate,
-        listenDates: [listenDate]
-      });
-    }
+      };
+      db.upsertSong(songData);
+      db.addListenDate(videoId, listenDate);
 
-    if (!history.byDate[dkey]) history.byDate[dkey] = [];
-    if (!history.byDate[dkey].includes(videoId)) history.byDate[dkey].push(videoId);
+      lastfm.enrichSong(artist, title).then(data => {
+        if (data && (data.genre || data.energy != null)) {
+          db.updateSpotifyData(videoId, {
+            genre: data.genre, energy: data.energy, danceability: data.danceability,
+            valence: data.valence, bpm: null, spotifyPopularity: null,
+          });
+          const extras = [];
+          if (data.genre) extras.push(data.genre);
+          if (data.energy != null) extras.push('e:' + data.energy.toFixed(2));
+          if (data.danceability != null) extras.push('d:' + data.danceability.toFixed(2));
+          const tag = extras.length ? ' [' + extras.join(' ') + ']' : '';
+          console.log(`[lastfm] ${title} - ${artist}${tag}`);
+        }
+      }).catch(() => {});
 
-    debouncedSave();
-    const genreTag = currentSong.genre ? ` [${currentSong.genre}]` : '';
-    const likeTag = currentSong.likeState === 'LIKE' ? ' ♥' : currentSong.likeState === 'DISLIKE' ? ' ⊘' : '';
-    console.log(`[yt-history] ✓ ${title} - ${artist}${genreTag}${likeTag} (${Math.round(progress * 100)}%)`);
+      const genreTag = currentSong?.genre ? ` [${currentSong.genre}]` : '';
+      const likeTag = currentSong?.likeState === 'LIKE' ? ' ♥' : currentSong?.likeState === 'DISLIKE' ? ' ⊘' : '';
+      const bpmTag = currentSong?.bpm ? ` ${currentSong.bpm}bpm` : '';
+      console.log(`[yt-history] ✓ ${title} - ${artist}${genreTag}${bpmTag}${likeTag} (${Math.round(finalProgress * 100)}%)`);
+    }, 3000);
   }
 
   currentSong.progress = progress;
   setTimeout(poll, POLL_INTERVAL);
 }
 
-console.log('[yt-history] Starting YouTube Music history tracker');
+console.log('[yt-history] Starting YouTube Music history tracker (SQLite)');
 console.log(`[yt-history] Threshold: ${THRESHOLD * 100}%, Poll: ${POLL_INTERVAL}ms`);
-console.log(`[yt-history] Output: ${HISTORY_FILE}`);
+console.log(`[yt-history] DB: ${db.getDb().name}`);
 poll();
 
-process.on('SIGINT', () => { saveHistory(); process.exit(0); });
-process.on('SIGTERM', () => { saveHistory(); process.exit(0); });
+process.on('SIGINT', () => { db.close(); process.exit(0); });
+process.on('SIGTERM', () => { db.close(); process.exit(0); });

@@ -4,13 +4,19 @@
   "description": "",
   "main": "tracker.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dashboard": "node dashboard-server.js",
+    "migrate": "node migrate.js",
+    "tracker": "node tracker.js",
+    "mcp": "node mcp-server.js",
+    "enrich": "node lastfm-enrich.js",
+    "spotify-oauth": "node spotify-oauth.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "better-sqlite3": "^12.11.1"
   }
 }

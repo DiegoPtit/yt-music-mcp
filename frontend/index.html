@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>yt wrapped</title>
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --card: #111;
+    --accent: #00ff41;
+    --text: #eee;
+    --text-dim: #666;
+    --border: #1a1a1a;
+    --radius: 14px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; background: var(--bg); }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: var(--text); }
+
+  #app { height: 100dvh; display: flex; flex-direction: column; max-width: 500px; margin: 0 auto; }
+
+  .top-bar { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px 0; flex-shrink: 0; }
+  .logo { font-size: 1.2rem; font-weight: 900; color: var(--accent); letter-spacing: -.03em; }
+  .chip-group { display: flex; gap: 3px; background: var(--card); border-radius: 10px; padding: 3px; border: 1px solid var(--border); }
+  .chip { background: none; border: none; color: var(--text-dim); padding: 5px 10px; border-radius: 7px; cursor: pointer; font-size: .7rem; font-weight: 600; transition: all .15s; text-transform: uppercase; letter-spacing: .03em; }
+  .chip.active { background: var(--accent); color: #000; }
+
+  .now-bar { margin: 8px 16px 0; padding: 8px 12px; background: var(--card); border-radius: var(--radius); display: flex; align-items: center; gap: 10px; flex-shrink: 0; border: 1px solid var(--border); }
+  .now-thumb { width: 36px; height: 36px; border-radius: 6px; object-fit: cover; flex-shrink: 0; background: #1a1a1a; }
+  .now-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .now-dot.playing { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 1.5s infinite; }
+  .now-dot.paused { background: var(--text-dim); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+  .now-info { flex: 1; min-width: 0; }
+  .now-title { font-size: .85rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .now-artist { font-size: .75rem; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .carousel-wrap { flex: 1; position: relative; overflow: hidden; margin: 6px 12px 0; }
+  .carousel { display: flex; height: 100%; transition: transform .35s cubic-bezier(.22,.68,0,1); will-change: transform; }
+  .slide { min-width: 100%; height: 100%; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; }
+  .slide::-webkit-scrollbar { width: 3px; } .slide::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .card { background: var(--card); border-radius: var(--radius); border: 1px solid var(--border); padding: 16px; flex: 1; display: flex; flex-direction: column; box-shadow: 0 0 20px rgba(0,255,65,.05); }
+  .card-title { font-size: .85rem; font-weight: 700; color: var(--accent); margin-bottom: 10px; flex-shrink: 0; letter-spacing: .02em; }
+
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; flex: 1; align-content: center; }
+  .stat-card { background: var(--bg); border-radius: 10px; padding: 14px 10px; text-align: center; border: 1px solid var(--border); display: flex; flex-direction: column; justify-content: center; }
+  .stat-num { font-size: 1.8rem; font-weight: 900; color: var(--accent); line-height: 1.1; }
+  .stat-label { font-size: .65rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: .06em; margin-top: 4px; }
+
+  .rank-list { list-style: none; flex: 1; overflow-y: auto; }
+  .rank-item { display: flex; align-items: center; padding: 6px 0; border-bottom: 1px solid #181818; gap: 8px; }
+  .rank-item:last-child { border: none; }
+  .rank-thumb { width: 32px; height: 32px; border-radius: 6px; object-fit: cover; flex-shrink: 0; background: #1a1a1a; }
+  .rank-pos { font-size: .75rem; font-weight: 800; color: var(--accent); width: 20px; text-align: center; flex-shrink: 0; }
+  .rank-name { flex: 1; font-size: .82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rank-stat { font-size: .7rem; color: var(--text-dim); flex-shrink: 0; font-weight: 600; }
+  .rank-bar { height: 3px; border-radius: 2px; background: var(--accent); opacity: .15; margin-top: 3px; }
+  .rank-bar-fill { height: 100%; border-radius: 2px; background: var(--accent); transition: width .4s; }
+
+  .today-scroll { flex: 1; overflow-y: auto; }
+  .today-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #181818; }
+  .today-item:last-child { border: none; }
+  .today-thumb { width: 32px; height: 32px; border-radius: 6px; object-fit: cover; flex-shrink: 0; background: #1a1a1a; }
+  .today-plays { font-size: 1rem; font-weight: 800; color: var(--accent); width: 24px; text-align: center; flex-shrink: 0; }
+  .today-info { flex: 1; min-width: 0; }
+  .today-title { font-size: .82rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .today-meta { font-size: .68rem; color: var(--text-dim); }
+  .today-time { font-size: .62rem; color: var(--text-dim); flex-shrink: 0; }
+
+  .hm-scroll { overflow-x: auto; flex: 1; display: flex; flex-direction: column; }
+  .hm-scroll::-webkit-scrollbar { height: 2px; }
+  .hm-grid { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+  .hm-row { display: flex; gap: 2px; flex: 1; }
+  .hm-cell { flex: 1; aspect-ratio: 1; border-radius: 3px; position: relative; cursor: default; min-height: 6px; }
+  .hm-cell.empty { background: #050505; border: 1px solid #111; }
+  .hm-cell.zero { background: #0d0d0d; border: 1px solid #1a1a1a; }
+  .hm-cell.l1 { background: #0a3310; } .hm-cell.l2 { background: #0d5c1a; } .hm-cell.l3 { background: #0f8c24; } .hm-cell.l4 { background: #00b82e; } .hm-cell.l5 { background: var(--accent); }
+  .hm-cell { cursor: default; }
+  .hm-headers { display: flex; margin-bottom: 2px; gap: 2px; }
+  .hm-headers span { flex: 1; text-align: center; font-size: .55rem; color: var(--text-dim); }
+  .hm-legend { display: flex; align-items: center; gap: 5px; justify-content: flex-end; font-size: .62rem; color: var(--text-dim); flex-shrink: 0; margin-top: 6px; }
+  .hm-lc { width: 12px; height: 12px; border-radius: 2px; }
+  .hm-labels { display: flex; font-size: .55rem; color: var(--text-dim); justify-content: space-between; }
+
+  .bar-chart { display: flex; align-items: flex-end; gap: 2px; flex: 1; padding-top: 6px; }
+  .bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; position: relative; }
+  .bar { width: 100%; border-radius: 3px 3px 0 0; transition: height .4s; min-height: 1px; background: linear-gradient(to top, #008a22, var(--accent)); }
+  .bar-overlay { width: 100%; position: absolute; bottom: 0; left: 0; border-radius: 3px 3px 0 0; background: rgba(255,40,40,.35); animation: pulse-red 1.2s ease-in-out infinite; pointer-events: none; }
+  @keyframes pulse-red { 0%,100%{opacity:.3;box-shadow:0 0 0 transparent} 50%{opacity:.7;box-shadow:0 0 12px rgba(255,40,40,.5)} }
+  .bar-label { font-size: .5rem; color: var(--text-dim); margin-top: 3px; text-align: center; }
+  .bar-label.now-label { color: #ff3333; font-weight: 700; font-size: .55rem; }
+
+  .nav-bar { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px max(12px, env(safe-area-inset-bottom)); flex-shrink: 0; }
+  .nav-btn { background: var(--card); border: 1px solid var(--border); color: var(--accent); width: 38px; height: 38px; border-radius: 50%; cursor: pointer; font-size: 1.1rem; transition: all .15s; display: flex; align-items: center; justify-content: center; }
+  .nav-btn:active { background: #1a1a1a; }
+  .nav-dots { display: flex; gap: 5px; }
+  .nav-dot { width: 6px; height: 6px; border-radius: 50%; background: #222; border: none; cursor: pointer; transition: all .2s; padding: 0; }
+  .nav-dot.active { background: var(--accent); box-shadow: 0 0 6px var(--accent); width: 18px; border-radius: 3px; }
+
+  .empty-state { color: var(--text-dim); font-size: .8rem; text-align: center; padding: 20px 0; flex: 1; display: flex; align-items: center; justify-content: center; }
+
+  @media (max-width:380px) { .stat-num { font-size:1.4rem } .slide { padding:10px } .card { padding:12px } }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="top-bar">
+    <div class="logo">yt wrapped</div>
+    <div class="chip-group">
+      <button class="chip" :class="{ active: period === 'today' }" @click="setPeriod('today')">today</button>
+      <button class="chip" :class="{ active: period === 'week' }" @click="setPeriod('week')">week</button>
+      <button class="chip" :class="{ active: period === 'month' }" @click="setPeriod('month')">month</button>
+    </div>
+  </div>
+
+  <div class="now-bar">
+    <img class="now-thumb" :src="ytThumb(now.videoId)" @error="onImgErr" v-if="now.playing">
+    <div class="now-dot" :class="now.playing ? 'playing' : 'paused'"></div>
+    <div class="now-info">
+      <div class="now-title" v-if="now.playing">{{ now.title }}</div>
+      <div class="now-title" v-else style="color:var(--text-dim)">nothing playing</div>
+      <div class="now-artist" v-if="now.playing">{{ now.artist }}</div>
+      <div class="now-artist" v-else>play a song to see it here</div>
+    </div>
+  </div>
+
+  <div class="carousel-wrap">
+    <div class="carousel" :style="{ transform: `translateX(-${slide * 100}%)` }">
+      <!-- 0: OVERVIEW -->
+      <div class="slide"><div class="card">
+        <div class="card-title">overview</div>
+        <div class="stat-grid">
+          <div class="stat-card"><div class="stat-num">{{ stats.totalSongs }}</div><div class="stat-label">songs</div></div>
+          <div class="stat-card"><div class="stat-num">{{ stats.totalPlays }}</div><div class="stat-label">plays</div></div>
+          <div class="stat-card"><div class="stat-num">{{ stats.totalMinutes }}</div><div class="stat-label">minutes</div></div>
+          <div class="stat-card"><div class="stat-num">{{ stats.likedSongs }}</div><div class="stat-label">liked</div></div>
+          <div class="stat-card"><div class="stat-num">{{ stats.daysActive }}</div><div class="stat-label">days</div></div>
+          <div class="stat-card"><div class="stat-num">{{ stats.songsWithBpm }}</div><div class="stat-label">bpm</div></div>
+        </div>
+      </div></div>
+
+      <!-- 1: TOP SONGS -->
+      <div class="slide"><div class="card">
+        <div class="card-title">top songs</div>
+        <ol class="rank-list">
+          <li class="rank-item" v-for="(s, i) in topSongs" :key="s.videoId || i">
+            <img class="rank-thumb" :src="ytThumb(s.videoId)" @error="onImgErr">
+            <span class="rank-pos">{{ i + 1 }}</span>
+            <span class="rank-name">{{ s.title }}</span>
+            <span class="rank-stat">{{ s.plays }}x</span>
+          </li>
+          <li v-if="topSongs.length === 0" class="empty-state">no data</li>
+        </ol>
+      </div></div>
+
+      <!-- 2: TOP ARTISTS -->
+      <div class="slide"><div class="card">
+        <div class="card-title">top artists</div>
+        <ol class="rank-list">
+          <li class="rank-item" v-for="(a, i) in topArtists" :key="a.artist">
+            <span class="rank-pos">{{ i + 1 }}</span>
+            <span class="rank-name">{{ a.artist }}</span>
+            <span class="rank-stat">{{ a.plays }}</span>
+          </li>
+          <li v-if="topArtists.length === 0" class="empty-state">no data</li>
+        </ol>
+      </div></div>
+
+      <!-- 3: TOP GENRES -->
+      <div class="slide"><div class="card">
+        <div class="card-title">top genres</div>
+        <ol class="rank-list">
+          <li class="rank-item" v-for="(g, i) in topGenres" :key="g.genre">
+            <span class="rank-pos">{{ i + 1 }}</span>
+            <span class="rank-name">{{ g.genre }}</span>
+            <span class="rank-stat">{{ g.plays }}</span>
+            <div class="rank-bar" style="flex:1;max-width:60px"><div class="rank-bar-fill" :style="{ width: (g.plays / maxGenre * 100) + '%' }"></div></div>
+          </li>
+          <li v-if="topGenres.length === 0" class="empty-state">no data</li>
+        </ol>
+      </div></div>
+
+      <!-- 4: TODAY LIVE -->
+      <div class="slide"><div class="card">
+        <div class="card-title">today · live</div>
+        <div v-if="todaySongs.length === 0" class="empty-state">no songs yet today</div>
+        <div class="today-scroll" v-else>
+          <div class="today-item" v-for="s in todaySongs" :key="s.videoId">
+            <img class="today-thumb" :src="ytThumb(s.videoId)" @error="onImgErr">
+            <span class="today-plays">{{ s.plays }}</span>
+            <div class="today-info">
+              <div class="today-title">{{ s.title }}</div>
+              <div class="today-meta">{{ s.artist }}{{ s.genre ? ' · ' + s.genre : '' }}{{ s.bpm ? ' · ' + s.bpm + 'bpm' : '' }}</div>
+            </div>
+            <span class="today-time">{{ s.lastListened }}</span>
+          </div>
+        </div>
+      </div></div>
+
+      <!-- 5: HEATMAP -->
+      <div class="slide"><div class="card">
+        <div class="card-title">heatmap <span v-if="period === 'today'" style="font-weight:400;color:var(--text-dim);font-size:.75rem">· hourly</span></div>
+        <div class="hm-scroll" v-if="hmRows.length > 0">
+          <template v-if="period === 'today'">
+            <div class="hm-grid">
+              <div v-for="(row, ri) in hmRows" :key="ri" style="display:flex;align-items:center;gap:4px">
+                <span style="font-size:.55rem;color:var(--text-dim);width:28px;text-align:right;flex-shrink:0">{{ ['00-05','06-11','12-17','18-23'][ri] }}</span>
+                <div class="hm-row" style="flex:1">
+                  <div v-for="cell in row" :key="cell.label" class="hm-cell" :class="hmClass(cell.count, hmMax)" :title="cell.label + ': ' + cell.count + ' plays'"></div>
+                </div>
+              </div>
+            </div>
+          </template>
+          <template v-else>
+            <div class="hm-headers"><span v-for="d in ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']" :key="d">{{ d }}</span></div>
+            <div class="hm-grid">
+              <div v-for="(week, wi) in hmRows" :key="wi" class="hm-row">
+                <div v-for="day in week" :key="day.date || wi + '-' + day.day" class="hm-cell" :class="hmClass(day.count, hmMax, day.empty)" :title="day.empty ? '' : day.date + ': ' + day.count + ' plays'"></div>
+              </div>
+            </div>
+          </template>
+        </div>
+        <div v-else class="empty-state">no data</div>
+        <div class="hm-legend">
+          <span>less</span><div class="hm-lc" style="background:#0d0d0d;border:1px solid #1a1a1a"></div>
+          <div class="hm-lc" style="background:#0a3310"></div><div class="hm-lc" style="background:#0d5c1a"></div>
+          <div class="hm-lc" style="background:#0f8c24"></div><div class="hm-lc" style="background:var(--accent)"></div><span>more</span>
+        </div>
+      </div></div>
+
+      <!-- 6: HOURLY -->
+      <div class="slide"><div class="card">
+        <div class="card-title">hourly</div>
+        <div class="bar-chart">
+          <div class="bar-wrap" v-for="h in hourly" :key="h.hour">
+            <div class="bar" :style="{ height: h.pct + '%' }"></div>
+            <div v-if="h.hour === currentHour" class="bar-overlay" :style="{ height: h.pct + '%' }"></div>
+            <div class="bar-label" :class="{ 'now-label': h.hour === currentHour }">{{ h.label }}</div>
+          </div>
+        </div>
+      </div></div>
+
+      <!-- 7: OBSESSIONS -->
+      <div class="slide"><div class="card">
+        <div class="card-title">obsessions</div>
+        <ol class="rank-list">
+          <li class="rank-item" v-for="(s, i) in obsessions" :key="s.title + s.artist">
+            <span class="rank-pos">{{ i + 1 }}</span>
+            <span class="rank-name">{{ s.title }} · {{ s.artist }}</span>
+            <span class="rank-stat">{{ s.plays }}x</span>
+          </li>
+          <li v-if="obsessions.length === 0" class="empty-state">none yet</li>
+        </ol>
+      </div></div>
+
+      <!-- 8: REVIVAL -->
+      <div class="slide"><div class="card">
+        <div class="card-title">revival</div>
+        <ol class="rank-list">
+          <li class="rank-item" v-for="(s, i) in revival" :key="s.title + s.artist">
+            <span class="rank-pos">{{ i + 1 }}</span>
+            <span class="rank-name">{{ s.title }} · {{ s.artist }}</span>
+            <span class="rank-stat">{{ s.playCount }}x</span>
+          </li>
+          <li v-if="revival.length === 0" class="empty-state">nothing to revive</li>
+        </ol>
+      </div></div>
+    </div>
+  </div>
+
+  <div class="nav-bar">
+    <button class="nav-btn" @click="slide = slide > 0 ? slide - 1 : slide">‹</button>
+    <div class="nav-dots"><button class="nav-dot" v-for="i in total" :key="i" :class="{ active: slide === i - 1 }" @click="slide = i - 1"></button></div>
+    <button class="nav-btn" @click="slide = slide < total - 1 ? slide + 1 : slide">›</button>
+  </div>
+</div>
+
+<script>
+const { createApp, ref, computed, onMounted, onUnmounted } = Vue;
+
+createApp({
+  setup() {
+    const slide = ref(0); const total = 9; const period = ref('week');
+    const stats = ref({ totalSongs:0,totalPlays:0,totalMinutes:0,likedSongs:0,daysActive:0,songsWithBpm:0 });
+    const topSongs = ref([]); const topArtists = ref([]); const topGenres = ref([]);
+    const hourly = ref([]); const hmRows = ref([]); const hmMax = ref(1);
+    const currentHour = ref(new Date().getHours());
+    const todaySongs = ref([]); const obsessions = ref([]); const revival = ref([]);
+    const now = ref({ playing: false, videoId: null });
+
+    const maxGenre = computed(() => Math.max(1, ...topGenres.value.map(g => g.plays)));
+
+    function ytThumb(vid) { return vid ? `https://img.youtube.com/vi/${vid}/default.jpg` : ''; }
+    function onImgErr(e) { e.target.style.display = 'none'; }
+
+    function hmClass(count, max, empty) {
+      if (empty) return 'empty';
+      if (!count || count === 0) return 'zero';
+      const i = Math.min(4, Math.ceil(count / Math.max(1, max) * 5) - 1);
+      return 'l' + Math.max(0, i);
+    }
+
+    const BASE = window.location.protocol === 'file:' ? 'http://localhost:3456' : '';
+    async function api(path) { try { const r = await fetch(BASE + path); return r.ok ? r.json() : null; } catch { return null; } }
+
+    function dayToCol(d) { return d === 0 ? 6 : d - 1; }
+
+    function buildHeatmap(data, todayHourly) {
+      if (period.value === 'today') {
+        const max = Math.max(1, ...(todayHourly || []).map(h => h.count));
+        hmMax.value = max;
+        const full = [];
+        for (let i = 0; i < 24; i++) {
+          const e = (todayHourly || []).find(h => h.hour === i);
+          full.push({ label: String(i).padStart(2,'0') + ':00', count: e ? e.count : 0 });
+        }
+        hmRows.value = [full.slice(0,6), full.slice(6,12), full.slice(12,18), full.slice(18,24)];
+        return;
+      }
+
+      if (!data?.length) { hmRows.value = []; return; }
+      const today = new Date();
+      const daysBack = period.value === 'week' ? 7 : 30;
+      let max = 1;
+      const weeks = []; let week = [];
+
+      const startDate = new Date(today); startDate.setDate(startDate.getDate() - daysBack + 1);
+      const leadEmpty = dayToCol(startDate.getDay());
+      for (let i = 0; i < leadEmpty; i++) week.push({ count: 0, empty: true });
+
+      for (let i = 0; i < daysBack; i++) {
+        const d = new Date(today); d.setDate(d.getDate() - (daysBack - 1 - i));
+        const key = d.toISOString().split('T')[0];
+        const e = data.find(x => x.date === key);
+        const c = e ? e.count : 0;
+        if (c > max) max = c;
+        week.push({ date: key, count: c, day: d.getDay() });
+        if (d.getDay() === 6) { weeks.push(week); week = []; }
+      }
+      if (week.length > 0) {
+        const lastReal = week.filter(d => !d.empty).pop();
+        const lastCol = lastReal ? dayToCol(lastReal.day) : 6;
+        for (let i = lastCol + 1; i < 7; i++) week.push({ count: 0, empty: true });
+        weeks.push(week);
+      }
+      hmRows.value = weeks;
+      hmMax.value = max;
+    }
+
+    function processHourly(data) {
+      if (!data?.length) { hourly.value = []; return; }
+      const maxC = Math.max(...data.map(h => h.count), 1);
+      const filled = [];
+      for (let i = 0; i < 24; i++) {
+        const e = data.find(h => h.hour === i);
+        filled.push({ hour: i, count: e ? e.count : 0, pct: ((e ? e.count : 0) / maxC) * 100, label: String(i).padStart(2,'0') });
+      }
+      hourly.value = filled;
+    }
+
+    async function loadAll() {
+      const p = '?period=' + period.value;
+      const [s, ts, ta, tg, hm, td, obs, rev] = await Promise.all([
+        api('/api/stats'+p), api('/api/top-songs'+p), api('/api/top-artists'+p), api('/api/top-genres'+p),
+        api('/api/heatmap'+p), api('/api/today'), api('/api/obsessions'+p), api('/api/revival'),
+      ]);
+      if (s) stats.value = s;
+      if (ts) topSongs.value = ts;
+      if (ta) topArtists.value = ta;
+      if (tg) topGenres.value = tg;
+      if (hm) { buildHeatmap(hm.data, hm.todayHourly); processHourly(hm.hourly); }
+      if (td) todaySongs.value = td;
+      if (obs?.obsessions) obsessions.value = obs.obsessions;
+      if (rev?.songs) revival.value = rev.songs;
+    }
+
+    async function loadNow() {
+      const n = await api('/api/now');
+      if (n) now.value = n;
+    }
+
+    async function loadToday() {
+      const td = await api('/api/today');
+      if (td) todaySongs.value = td;
+    }
+
+    function setPeriod(p) { period.value = p; slide.value = 0; loadAll(); }
+
+    let nowInt, todayInt, hourInt;
+    onMounted(() => {
+      loadAll(); loadNow();
+      nowInt = setInterval(loadNow, 5000);
+      todayInt = setInterval(loadToday, 15000);
+      hourInt = setInterval(() => { currentHour.value = new Date().getHours(); }, 60000);
+    });
+    onUnmounted(() => { clearInterval(nowInt); clearInterval(todayInt); clearInterval(hourInt); });
+
+    return {
+      slide, total, period, stats, topSongs, topArtists, topGenres, hourly,
+      hmRows, hmMax, todaySongs, obsessions, revival, now, currentHour,
+      maxGenre, ytThumb, onImgErr, hmClass, loadAll, setPeriod,
+    };
+  },
+}).mount('#app');
+</script>
+</body>
+</html>
