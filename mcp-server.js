@@ -16,6 +16,15 @@ const db = require('./db');
 
 let token = null;
 
+// Mutex to serialize search requests — th-ch/youtube-music api-server
+// returns wrong results when multiple search POSTs overlap.
+let searchQueue = Promise.resolve();
+function serializedSearch(endpoint, opts) {
+  const task = searchQueue.then(() => api(endpoint, opts));
+  searchQueue = task.catch(() => {});
+  return task;
+}
+
 async function getToken() {
   if (token) return token;
   const res = await fetch(`${API_BASE}/auth/${AUTH_ID}`, { method: 'POST' });
@@ -305,7 +314,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case 'ytm_previous': { await api('/api/v1/previous', { method: 'POST' }); return { content: [{ type: 'text', text: 'Went to previous song' }] }; }
 
       case 'ytm_search': {
-        const data = await api('/api/v1/search', { method: 'POST', timeout: 10000, body: { query: args.query, params: args.type || 'song' } });
+        const data = await serializedSearch('/api/v1/search', { method: 'POST', timeout: 10000, body: { query: args.query, params: args.type || 'song' } });
         const songs = extractSearchResults(data);
         return { content: [{ type: 'text', text: JSON.stringify({ query: args.query, total: songs.length, results: songs.slice(0, 20) }, null, 2) }] };
       }
@@ -319,7 +328,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           return { content: [{ type: 'text', text: `Could not play that video on YouTube Music (try searching by name instead)` }], isError: true };
         }
         if (!args.query) return { content: [{ type: 'text', text: 'Provide videoId or query' }], isError: true };
-        const search = await api('/api/v1/search', { method: 'POST', timeout: 10000, body: { query: args.query, params: 'song' } });
+        const search = await serializedSearch('/api/v1/search', { method: 'POST', timeout: 10000, body: { query: args.query, params: 'song' } });
         const results = extractSearchResults(search);
         if (results.length === 0) return { content: [{ type: 'text', text: `No results for: ${args.query}` }], isError: true };
         for (const r of results) {
@@ -389,7 +398,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         const knownIds = new Set(songs.map(s => s.videoId));
         for (const q of searchQueries) {
           try {
-            const data = await api('/api/v1/search', { method: 'POST', timeout: 10000, body: { query: q, params: 'song' } });
+            const data = await serializedSearch('/api/v1/search', { method: 'POST', timeout: 10000, body: { query: q, params: 'song' } });
             const items = extractSearchResults(data);
             const fresh = items.filter(r => r.videoId && !knownIds.has(r.videoId));
             results.push(...fresh.slice(0, 5));
@@ -467,7 +476,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           return { content: [{ type: 'text', text: `Error playing` }], isError: true };
         }
         if (args.query) {
-          const data = await api('/api/v1/search', { method: 'POST', timeout: 10000, body: { query: args.query, params: args.type || 'song' } });
+          const data = await serializedSearch('/api/v1/search', { method: 'POST', timeout: 10000, body: { query: args.query, params: args.type || 'song' } });
           const songs = extractSearchResults(data);
           if (songs.length === 0) return { content: [{ type: 'text', text: 'No results' }], isError: true };
           for (const s of songs) {
@@ -482,7 +491,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
 
       case 'ytm_search_and_play': {
-        const data = await api('/api/v1/search', { method: 'POST', timeout: 10000, body: { query: args.query, params: args.type || 'song' } });
+        const data = await serializedSearch('/api/v1/search', { method: 'POST', timeout: 10000, body: { query: args.query, params: args.type || 'song' } });
         const results = extractSearchResults(data);
         if (results.length === 0) return { content: [{ type: 'text', text: `No results for: ${args.query}` }], isError: true };
         for (const r of results) {
@@ -578,7 +587,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         const results = [];
         for (const g of topGenres) {
           try {
-            const data = await api('/api/v1/search', { method: 'POST', timeout: 10000, body: { query: `${g.genre} new songs 2026`, params: 'song' } });
+            const data = await serializedSearch('/api/v1/search', { method: 'POST', timeout: 10000, body: { query: `${g.genre} new songs 2026`, params: 'song' } });
             const items = extractSearchResults(data);
             const fresh = items.filter(r => r.videoId && !knownIds.has(r.videoId));
             results.push(...fresh.slice(0, 3));
