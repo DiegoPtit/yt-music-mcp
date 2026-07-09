@@ -1,8 +1,9 @@
+require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 
-const CLIENT_ID = 'e7b7d49f4cfb4b4e8d387da1a70936dd';
-const CLIENT_SECRET = '86565a8715ae4f49865ed22b329234eb';
+const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
+const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
 const CONFIG_FILE = path.join(process.env.HOME, '.config', 'yt-music-mcp', 'spotify.json');
 
 let cachedTokens = null;

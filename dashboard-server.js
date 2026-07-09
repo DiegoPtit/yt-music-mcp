@@ -1,10 +1,11 @@
 #!/usr/bin/env node
+require('dotenv').config();
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const db = require('./db');
 
-const PORT = 3456;
+const PORT = parseInt(process.env.DASHBOARD_PORT) || 3456;
 const FRONTEND_PATH = path.join(__dirname, 'frontend', 'index.html');
 
 function serveFile(res, filePath, contentType) {
@@ -135,7 +136,9 @@ const router = {
 
   '/api/now': async () => {
     try {
-      const res = await fetch('http://0.0.0.0:26538/api/v1/song', { signal: AbortSignal.timeout(3000) });
+      const ytHost = process.env.YT_MUSIC_HOST || '0.0.0.0';
+      const ytPort = process.env.YT_MUSIC_PORT || '26538';
+      const res = await fetch(`http://${ytHost}:${ytPort}/api/v1/song`, { signal: AbortSignal.timeout(3000) });
       if (!res.ok) return { playing: false };
       const song = await res.json();
       if (!song?.videoId) return { playing: false };

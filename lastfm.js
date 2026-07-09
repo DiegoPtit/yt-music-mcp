@@ -1,5 +1,6 @@
-const API_KEY = 'cef8408e7417e5b23ff6fff7538a3061';
-const API_SECRET = '92a5b1adbe4e2d092a59530bf9a2c19b';
+require('dotenv').config();
+const API_KEY = process.env.LASTFM_API_KEY;
+const API_SECRET = process.env.LASTFM_API_SECRET;
 const BASE = 'https://ws.audioscrobbler.com/2.0/';
 
 const MOOD_MAP = {

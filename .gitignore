@@ -1,3 +1,4 @@
 node_modules/
 listening-history.json
 genre-cache.json
+.env

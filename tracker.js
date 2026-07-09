@@ -1,7 +1,8 @@
-const API_BASE = 'http://0.0.0.0:26538';
-const AUTH_ID = 'mr6o2iu4';
-const POLL_INTERVAL = 2000;
-const THRESHOLD = 0.45;
+require('dotenv').config();
+const API_BASE = `http://${process.env.YT_MUSIC_HOST || '0.0.0.0'}:${process.env.YT_MUSIC_PORT || '26538'}`;
+const AUTH_ID = process.env.YT_MUSIC_AUTH;
+const POLL_INTERVAL = parseInt(process.env.TRACKER_POLL_INTERVAL) || 2000;
+const THRESHOLD = (parseInt(process.env.TRACKER_THRESHOLD) || 45) / 100;
 const db = require('./db');
 const lastfm = require('./lastfm');
 
@@ -153,7 +154,7 @@ async function fetchGenreFromMusicBrainz(artist) {
 async function fetchGenreFromYtInnerTube(videoId) {
   try {
     const res = await fetch(
-      'https://music.youtube.com/youtubei/v1/next?key=AIzaSyC9XL3ZjBdd0deK2q1kR0mGnS1lW4P3O8k',
+      'https://music.youtube.com/youtubei/v1/next?key=' + (process.env.YT_INNERTUBE_KEY || 'AIzaSyC9XL3ZjBdd0deK2q1kR0mGnS1lW4P3O8k'),
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

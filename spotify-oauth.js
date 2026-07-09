@@ -1,13 +1,14 @@
 #!/usr/bin/env node
+require('dotenv').config();
 const http = require('http');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
-const CLIENT_ID = 'e7b7d49f4cfb4b4e8d387da1a70936dd';
-const CLIENT_SECRET = '86565a8715ae4f49865ed22b329234eb';
-const REDIRECT_URI = 'http://127.0.0.1:8888/callback';
+const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
+const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
+const REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || 'http://127.0.0.1:8888/callback';
 const CONFIG_DIR = path.join(process.env.HOME, '.config', 'yt-music-mcp');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'spotify.json');
 
