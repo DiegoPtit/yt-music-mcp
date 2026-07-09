@@ -2,7 +2,7 @@
 
 MCP server + listening history tracker for [th-ch/youtube-music](https://github.com/th-ch/youtube-music).
 
-Control YouTube Music from opencode, Claude Desktop, or any MCP client. Play songs, create mixes, query listening stats, and get recommendations based on your actual listening history.
+Control YouTube Music from opencode, Claude Desktop, or any MCP client. Play songs, create mixes, query listening stats, get recommendations based on your actual listening history — all backed by a SQLite database with genre, mood, and BPM enrichment via Last.fm.
 
 ---
 
@@ -10,7 +10,7 @@ Control YouTube Music from opencode, Claude Desktop, or any MCP client. Play son
 
 **th-ch/youtube-music** with the **api-server** plugin enabled.
 
-The api-server exposes an HTTP API at `http://0.0.0.0:26538` (default). The MCP server cannot connect without it.
+The api-server exposes an HTTP API. The MCP server cannot connect without it.
 
 From the YT Music UI: `Plugins → api-server → enabled`. Or add it in `config.json`:
 
@@ -31,7 +31,31 @@ From the YT Music UI: `Plugins → api-server → enabled`. Or add it in `config
 git clone https://github.com/DiegoPtit/yt-music-mcp
 cd yt-music-mcp
 npm install
+cp .env.example .env    # then edit .env with your secrets
 ```
+
+### Environment variables
+
+All secrets and configuration go in `.env` (not tracked in git):
+
+```env
+YT_MUSIC_HOST=0.0.0.0
+YT_MUSIC_PORT=26538
+YT_MUSIC_AUTH=your_api_server_auth
+
+LASTFM_API_KEY=your_lastfm_api_key
+LASTFM_API_SECRET=your_lastfm_api_secret
+
+SPOTIFY_CLIENT_ID=your_spotify_client_id
+SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
+SPOTIFY_REDIRECT_URI=http://127.0.0.1:8888/callback
+
+DASHBOARD_PORT=3456
+TRACKER_THRESHOLD=45
+TRACKER_POLL_INTERVAL=2000
+```
+
+See `.env.example` for the full list.
 
 ### Register with opencode
 
@@ -85,6 +109,7 @@ For other MCP clients (Claude Desktop, etc.), configure the command `node /path/
 | `ytm_like` | Like the current song |
 | `ytm_dislike` | Dislike the current song |
 | `ytm_search` | Search for songs, albums, playlists |
+| `ytm_search_and_play` | Search + play in one step, returns metadata |
 
 ### History & Stats
 
@@ -93,21 +118,35 @@ For other MCP clients (Claude Desktop, etc.), configure the command `node /path/
 | `ytm_history` | Listening history (sortable: `recent`, `plays`, `liked`) |
 | `ytm_stats` | Statistics: total songs, genres, top artists |
 | `ytm_recommend` | Recommendations based on your actual listening history |
+| `ytm_wrapped` | Weekly/monthly wrapped summary (like Spotify Wrapped) |
+| `ytm_similar_to` | Similar songs from your history (same artist + same genre) |
+| `ytm_obsessions` | Songs you are obsessing over (many plays in short period) |
+| `ytm_revival` | Songs you used to love but haven't listened to in 30+ days |
+
+### Smart Playlists
+
+| Tool | Description |
+|------|-------------|
+| `ytm_vibe_play` | Auto-mix based on current hour/day patterns from your history |
+| `ytm_discover_weekly` | Discover new songs from your top genres on YT Music |
+| `ytm_weather_play` | Playlist by vibe (morning/afternoon/night/rainy/sunny/chill) |
+| `ytm_fiesta_mode` | Boost volume + crossfade if recent songs are high-energy |
+| `ytm_lyrics` | Get synced lyrics for the current song (via YT Music) |
 
 ---
 
 ## Listening History Tracker
 
-`tracker.js` connects to the YT Music api-server and automatically records every song that exceeds **45%** playback.
+`tracker.js` connects to the YT Music api-server and automatically records every song that exceeds the configured **threshold** (default 45%).
 
 ### Per-song data tracked:
 
 - `title`, `artist`, `album`, `duration`
-- `genre` (resolved via: local map → MusicBrainz → InnerTube → cache)
+- `genre`, `energy`, `danceability`, `valence` (enriched via Last.fm tags)
+- `bpm` (from MusicBrainz tags or duration-based heuristic)
 - `likeState` (LIKE / DISLIKE / INDIFFERENT)
-- `playCount`, `timesCompleted`
-- `listenDates[]` with timestamps for each threshold crossing
-- Date-based classification (`byDate`)
+- `playCount`, `listenDates[]` with timestamps
+- Max playback progress
 
 ### Start the tracker:
 
@@ -123,31 +162,38 @@ systemctl --user enable --now $(pwd)/systemd/yt-music-history.service
 
 ---
 
-## CLI: `yt-history`
+## Dashboard
+
+A Vue 3 web dashboard with a 9-slide carousel:
 
 ```bash
-yt-history stats          # General statistics
-yt-history list           # Songs sorted by date
-yt-history list plays     # Songs sorted by play count
-yt-history top 10         # Top 10 most played
-yt-history genres         # Genre breakdown
-yt-history search <q>     # Search history
-yt-history date YYYY-MM-DD  # Songs from a specific date
-yt-history watch          # Real-time monitor
-yt-history export         # Full JSON export
+npm run dashboard
+# Opens at http://localhost:3456
 ```
+
+**Slides:** Overview stats, Top Songs, Top Artists, Top Genres, Today (live), Heatmap (weekly/monthly or hourly), Hourly Distribution, Obsessions, Revival.
+
+Period selector: `today` / `week` / `month`.
 
 ---
 
-## Mix Workflow
+## CLI: `yt-history`
 
-`ytm_mix` implements the empirically discovered workflow for creating properly ordered mixes:
-
-1. Clear the queue
-2. Play the first song
-3. Queue remaining songs with `position=next` in **reverse order**
-
-Each `queue_add` with `position=next` inserts immediately after the current track. By inserting from last to first, the final queue order matches the requested order.
+```bash
+npm run yt-history stats          # General statistics
+npm run yt-history list           # Songs sorted by date
+npm run yt-history list plays     # Songs sorted by play count
+npm run yt-history top 10         # Top 10 most played
+npm run yt-history genres         # Genre breakdown
+npm run yt-history search <q>     # Search history
+npm run yt-history date YYYY-MM-DD  # Songs from a specific date
+npm run yt-history watch          # Real-time monitor
+npm run yt-history export         # Full JSON export
+npm run yt-history bpm            # BPM data
+npm run yt-history obsessions     # Obsessions detection
+npm run yt-history revival        # Forgotten songs
+npm run yt-history heatmap        # Listening heatmap
+```
 
 ---
 
@@ -156,20 +202,36 @@ Each `queue_add` with `position=next` inserts immediately after the current trac
 ```
 th-ch/youtube-music (api-server :26538)
         │
-        ├── tracker.js ───→ listening-history.json
+        ├── tracker.js ───→ SQLite (listening-history.db)
+        │                       │
+        │                       └── Last.fm API (genre, energy, mood)
         │
         └── mcp-server.js ──→ opencode / Claude / any MCP client
-                                  │
-                                  └── yt-history.js (CLI)
+                │
+                ├── dashboard-server.js ──→ Vue 3 frontend (:3456)
+                └── yt-history.js (CLI)
 ```
 
-The tracker and MCP server are independent. Use either one or both.
+The tracker, MCP server, and dashboard are independent processes. Use any combination.
+
+---
+
+## Data Enrichment
+
+When a song crosses the playback threshold, the tracker:
+
+1. **Records** it to SQLite (`songs` + `listen_dates` tables)
+2. **Enriches** via Last.fm API — fetches track/artist tags, maps mood tags to energy/danceability/valence (0–1 scale), extracts genre
+3. **Estimates BPM** — tries MusicBrainz recording tags first, falls back to duration-based heuristic
+4. **Updates genre** cache for future lookups
+
+All enrichment runs asynchronously — the tracker never blocks on external APIs.
 
 ---
 
 ## Why this repo?
 
-- **Native API integration**: communicates with th-ch/youtube-music's built-in API server, no fragile scraping
-- **Real listening context**: recommendations use your actual history, not generic charts
-- **Exact mix ordering**: `ytm_mix` guarantees songs play in the order you specify
-- **Dual purpose**: works as an MCP server for AI agents and as a CLI for humans
+- **Native API integration**: communicates with th-ch/youtube-music's built-in API server, no scraping
+- **Real listening context**: recommendations and smart playlists use your actual history
+- **Mood detection**: genre tags from Last.fm map to estimated energy, danceability, and valence
+- **Dual purpose**: MCP server for AI agents + CLI for humans + web dashboard for visual browsing
