@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 require('dotenv').config();
+const path = require('path');
 const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
 const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
 const {
@@ -38,7 +39,7 @@ async function api(endpoint, opts = {}) {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-async function resolveVideoId(videoId) {
+async function resolveVideoId(videoId, opts = {}) {
   const valid = videoId && /^[\w-]{11}$/.test(videoId);
   if (!valid) return null;
   try {
@@ -49,7 +50,7 @@ async function resolveVideoId(videoId) {
         context: { client: { clientName: 'WEB_REMIX', clientVersion: '1.20250325.01.00' } },
         videoId,
       }),
-      signal: AbortSignal.timeout(3000),
+      signal: AbortSignal.timeout(opts.timeout || 3000),
     });
     const data = await res.json();
     return data?.videoDetails?.videoId || null;
@@ -177,10 +178,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'ytm_mix',
-      description: 'Create a custom mix: clear queue, play first song, then queue the rest in order.',
+      description: `Create a custom mix: play songs in exact order. Accepts a songs array directly OR a payload JS file path.
+
+When using "payload": write a .js file (e.g. /tmp/mix-payload.js) that exports an array:
+  module.exports = [
+    { videoId: "...", title: "...", artist: "..." },
+    ...
+  ];
+The first song plays immediately, the rest queue after it.
+
+The AI should write the payload file first (no timeout pressure), then call ytm_mix with the path.`,
       inputSchema: { type: 'object', properties: {
-        songs: { type: 'array', description: 'Songs in desired order (first = play now, rest = next up)', items: { type: 'object', properties: { videoId: { type: 'string' }, title: { type: 'string' }, artist: { type: 'string' } }, required: ['videoId'] } },
-      }, required: ['songs'] },
+        songs: { type: 'array', description: 'Songs in desired order (first = play now, rest = next up). Not needed if payload is provided.', items: { type: 'object', properties: { videoId: { type: 'string' }, title: { type: 'string' }, artist: { type: 'string' } }, required: ['videoId'] } },
+        payload: { type: 'string', description: 'Path to a .js file exporting the songs array (module.exports = [...]). The file is read and executed to get the song list.' },
+        timeoutMs: { type: 'number', description: 'Per-song resolve timeout in ms (default: 5000). Increase for slow networks.' },
+      } },
     },
     {
       name: 'ytm_playlist_start',
@@ -397,24 +409,50 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
 
       case 'ytm_mix': {
-        const mixSongs = args.songs;
+        const resolveTimeout = args.timeoutMs || 5000;
+
+        let mixSongs = args.songs;
+        if (args.payload) {
+          try {
+            const payloadPath = path.resolve(args.payload);
+            delete require.cache[require.resolve(payloadPath)];
+            mixSongs = require(payloadPath);
+            if (!Array.isArray(mixSongs)) throw new Error('payload must export an array');
+          } catch (e) {
+            return { content: [{ type: 'text', text: `Failed to load payload: ${e.message}` }], isError: true };
+          }
+        }
+
         if (!mixSongs || mixSongs.length < 2) return { content: [{ type: 'text', text: 'Need at least 2 songs for a mix' }], isError: true };
+
         const first = mixSongs[0];
         const rest = mixSongs.slice(1);
-        const validFirst = await resolveVideoId(first.videoId);
+
+        const validFirst = await resolveVideoId(first.videoId, { timeout: resolveTimeout });
         if (!validFirst) return { content: [{ type: 'text', text: `Invalid videoId for first song: ${first.videoId}` }], isError: true };
-        await api('/api/v1/queue', { method: 'DELETE' }); await sleep(600);
-        await api('/api/v1/queue', { method: 'POST', body: { videoId: validFirst, insertPosition: 'INSERT_AFTER_CURRENT_VIDEO' } }); await sleep(800);
-        await api('/api/v1/next', { method: 'POST' }); await sleep(3000);
-        const nowCheck = await api('/api/v1/song');
-        if (!nowCheck || !nowCheck.videoId || nowCheck.videoId === 'unknown') return { content: [{ type: 'text', text: 'Failed to play first song' }], isError: true };
+        await api('/api/v1/queue', { method: 'DELETE' }); await sleep(300);
+        await api('/api/v1/queue', { method: 'POST', body: { videoId: validFirst, insertPosition: 'INSERT_AFTER_CURRENT_VIDEO' } }); await sleep(400);
+        await api('/api/v1/next', { method: 'POST' });
+
+        // Poll until the song actually changes (max 10s)
+        let nowCheck = null;
+        for (let i = 0; i < 20; i++) {
+          await sleep(500);
+          nowCheck = await api('/api/v1/song');
+          if (nowCheck && nowCheck.videoId && nowCheck.videoId !== 'unknown' && nowCheck.videoId === validFirst) break;
+        }
+        if (!nowCheck || !nowCheck.videoId || nowCheck.videoId === 'unknown') {
+          return { content: [{ type: 'text', text: 'Failed to play first song' }], isError: true };
+        }
+
         let queued = 0, failed = 0;
         for (const s of rest) {
-          const vid = await resolveVideoId(s.videoId);
+          const vid = await resolveVideoId(s.videoId, { timeout: resolveTimeout });
           if (!vid) { failed++; continue; }
           await api('/api/v1/queue', { method: 'POST', body: { videoId: vid, insertPosition: 'INSERT_AFTER_CURRENT_VIDEO' } });
-          await sleep(400); queued++;
+          await sleep(300); queued++;
         }
+
         const info = await api('/api/v1/song');
         const label = info ? `${info.title} - ${info.artist}` : (first.title || first.videoId);
         return { content: [{ type: 'text', text: `Mix created: "${label}" + ${queued} songs queued${failed ? ` (${failed} failed)` : ''}` }] };
