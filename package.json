@@ -9,6 +9,7 @@
     "tracker": "node tracker.js",
     "mcp": "node mcp-server.js",
     "enrich": "node lastfm-enrich.js",
+    "export": "node export-dump.js",
     "spotify-oauth": "node spotify-oauth.js"
   },
   "keywords": [],
