@@ -282,6 +282,33 @@ The AI should write the payload file first (no timeout pressure), then call ytm_
       description: 'Get synced lyrics for the current playing song (via YT Music if available)',
       inputSchema: { type: 'object', properties: {} },
     },
+    {
+      name: 'register_peculiar_preferences',
+      description: `Register why the user loves the currently playing song. THE AI MUST FOLLOW THIS WORKFLOW:
+
+1. Run ytm_now to identify the current song (title, artist, videoId).
+2. Run ytm_lyrics to get the synced lyrics.
+3. Search the web for what the song means (lyric interpretations, artist intent, cultural context).
+4. Ask the user questions to understand their connection across these dimensions:
+   - EMOTIONAL: What emotion does this song trigger? Why does it resonate emotionally?
+   - TECHNICAL: What stands out musically (melody, vocals, production, rhythm)?
+   - PSYCHOLOGICAL: Deeper impact — does it reflect something in your life, change your perspective?
+   - PARTICULAR: Any other observation the user wants to record.
+5. Call this tool with all gathered data to save it.
+
+The saved preferences are available for future AI sessions via "user context" — use them to personalize recommendations, understand taste, and reference past conversations about songs.`,
+      inputSchema: { type: 'object', properties: {
+        videoId: { type: 'string', description: 'YouTube video ID of the song' },
+        title: { type: 'string', description: 'Song title' },
+        artist: { type: 'string', description: 'Artist name' },
+        emotional: { type: 'string', description: 'Emotional aspects — what emotion it triggers, why it resonates' },
+        technical: { type: 'string', description: 'Technical aspects — melody, vocals, production, rhythm' },
+        psychological: { type: 'string', description: 'Psychological impact — personal significance, perspective shifts' },
+        particular: { type: 'string', description: 'Any other particular observation the user wants recorded' },
+        meaning: { type: 'string', description: 'Song meaning from web research (lyric interpretations, artist intent)' },
+        lyricsSnippet: { type: 'string', description: 'A meaningful lyrics snippet the user connected with' },
+      }, required: ['videoId', 'title', 'artist'] },
+    },
   ],
 }));
 
@@ -672,6 +699,17 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         } catch {
           return { content: [{ type: 'text', text: `No synced lyrics available for "${song.title}"` }] };
         }
+      }
+
+      case 'register_peculiar_preferences': {
+        const pref = {
+          videoId: args.videoId, title: args.title, artist: args.artist,
+          emotional: args.emotional || null, technical: args.technical || null,
+          psychological: args.psychological || null, particular: args.particular || null,
+          meaning: args.meaning || null, lyricsSnippet: args.lyricsSnippet || null,
+        };
+        db.saveSongPreference(pref);
+        return { content: [{ type: 'text', text: JSON.stringify({ saved: true, videoId: pref.videoId, title: pref.title, artist: pref.artist }, null, 2) }] };
       }
 
       default:

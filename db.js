@@ -65,6 +65,20 @@ function initTables() {
     CREATE INDEX IF NOT EXISTS idx_listen_dates_listenedAt ON listen_dates(listenedAt);
     CREATE INDEX IF NOT EXISTS idx_songs_artist ON songs(artist);
     CREATE INDEX IF NOT EXISTS idx_songs_genre ON songs(genre);
+    CREATE TABLE IF NOT EXISTS song_preferences (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      videoId TEXT NOT NULL,
+      title TEXT NOT NULL,
+      artist TEXT NOT NULL,
+      emotional TEXT,
+      technical TEXT,
+      psychological TEXT,
+      particular TEXT,
+      meaning TEXT,
+      lyricsSnippet TEXT,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    );
   `);
 }
 
@@ -375,6 +389,35 @@ function getHighDanceabilitySongs(threshold = 0.7, limit = 20) {
   return getDb().prepare('SELECT * FROM songs WHERE danceability >= ? ORDER BY danceability DESC LIMIT ?').all(threshold, limit);
 }
 
+function saveSongPreference(data) {
+  const d = getDb();
+  const now = new Date().toISOString();
+  const existing = d.prepare('SELECT id FROM song_preferences WHERE videoId = ?').get(data.videoId);
+  if (existing) {
+    d.prepare(`
+      UPDATE song_preferences SET
+        emotional = ?, technical = ?, psychological = ?, particular = ?,
+        meaning = ?, lyricsSnippet = ?, updatedAt = ?
+      WHERE videoId = ?
+    `).run(data.emotional, data.technical, data.psychological, data.particular,
+      data.meaning, data.lyricsSnippet, now, data.videoId);
+  } else {
+    d.prepare(`
+      INSERT INTO song_preferences (videoId, title, artist, emotional, technical, psychological, particular, meaning, lyricsSnippet, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(data.videoId, data.title, data.artist, data.emotional, data.technical,
+      data.psychological, data.particular, data.meaning, data.lyricsSnippet, now, now);
+  }
+}
+
+function getSongPreferences(videoId) {
+  return getDb().prepare('SELECT * FROM song_preferences WHERE videoId = ?').get(videoId);
+}
+
+function getAllPreferences() {
+  return getDb().prepare('SELECT * FROM song_preferences ORDER BY updatedAt DESC').all();
+}
+
 module.exports = {
   getDb, upsertSong, addListenDate, getAllSongs, getSong,
   getTopSongs, getTopArtists, getTopGenres, getStats,
@@ -386,4 +429,5 @@ module.exports = {
   close, estimateBpm, fetchBpmFromMusicBrainz,
   getLikedSongs, getStatsForPeriod, updateSpotifyData,
   getSongsWithoutSpotify, getHighEnergySongs, getHighDanceabilitySongs,
+  saveSongPreference, getSongPreferences, getAllPreferences,
 };
