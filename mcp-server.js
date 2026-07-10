@@ -283,6 +283,15 @@ The AI should write the payload file first (no timeout pressure), then call ytm_
       inputSchema: { type: 'object', properties: {} },
     },
     {
+      name: 'get_peculiar_preferences',
+      description: 'Get all saved song preferences for context. Use this at the start of a session to understand the user\'s personal connections to songs. Optionally filter by videoId, artist, or search query.',
+      inputSchema: { type: 'object', properties: {
+        videoId: { type: 'string', description: 'Get preference for a specific song' },
+        artist: { type: 'string', description: 'Filter by artist' },
+        search: { type: 'string', description: 'Search in title, artist, or any preference field' },
+      } },
+    },
+    {
       name: 'register_peculiar_preferences',
       description: `Register why the user loves the currently playing song. THE AI MUST FOLLOW THIS WORKFLOW:
 
@@ -296,7 +305,7 @@ The AI should write the payload file first (no timeout pressure), then call ytm_
    - PARTICULAR: Any other observation the user wants to record.
 5. Call this tool with all gathered data to save it.
 
-The saved preferences are available for future AI sessions via "user context" — use them to personalize recommendations, understand taste, and reference past conversations about songs.`,
+The saved preferences are available for future AI sessions as user context — call get_peculiar_preferences at session start to retrieve them. Use them to personalize recommendations, understand taste, and reference past conversations about songs.`,
       inputSchema: { type: 'object', properties: {
         videoId: { type: 'string', description: 'YouTube video ID of the song' },
         title: { type: 'string', description: 'Song title' },
@@ -699,6 +708,22 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         } catch {
           return { content: [{ type: 'text', text: `No synced lyrics available for "${song.title}"` }] };
         }
+      }
+
+      case 'get_peculiar_preferences': {
+        let prefs;
+        if (args.videoId) {
+          const p = db.getSongPreferences(args.videoId);
+          prefs = p ? [p] : [];
+        } else if (args.artist) {
+          prefs = db.getDb().prepare('SELECT * FROM song_preferences WHERE artist LIKE ? ORDER BY updatedAt DESC').all(`%${args.artist}%`);
+        } else if (args.search) {
+          const q = `%${args.search}%`;
+          prefs = db.getDb().prepare(`SELECT * FROM song_preferences WHERE title LIKE ? OR artist LIKE ? OR emotional LIKE ? OR technical LIKE ? OR psychological LIKE ? OR particular LIKE ? OR meaning LIKE ? ORDER BY updatedAt DESC`).all(q, q, q, q, q, q, q);
+        } else {
+          prefs = db.getAllPreferences();
+        }
+        return { content: [{ type: 'text', text: JSON.stringify({ total: prefs.length, preferences: prefs }, null, 2) }] };
       }
 
       case 'register_peculiar_preferences': {
