@@ -748,12 +748,28 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
 server.setRequestHandler(ListPromptsRequestSchema, async () => ({
   prompts: [
     { name: 'music-recommendation', description: 'Get personalized music recommendations', arguments: [{ name: 'genre', description: 'Preferred genre (optional)', required: false }, { name: 'mood', description: 'Current mood (optional)', required: false }] },
+    { name: 'user-context', description: 'Get the user\'s personal music preferences context — their emotional/technical/psychological connections to songs they love. Call this at session start to personalize all interactions.', arguments: [] },
   ],
 }));
 
 server.setRequestHandler(GetPromptRequestSchema, async (req) => {
   if (req.params.name === 'music-recommendation') {
     return { messages: [{ role: 'user', content: { type: 'text', text: `Recommend music${req.params.arguments?.genre ? ` in genre: ${req.params.arguments.genre}` : ''}${req.params.arguments?.mood ? ` for mood: ${req.params.arguments.mood}` : ''}` } }] };
+  }
+  if (req.params.name === 'user-context') {
+    const prefs = db.getAllPreferences();
+    const summary = {
+      totalSaved: prefs.length,
+      preferences: prefs.map(p => ({
+        title: p.title, artist: p.artist,
+        emotional: p.emotional, technical: p.technical,
+        psychological: p.psychological, particular: p.particular,
+        meaning: p.meaning, lyricsSnippet: p.lyricsSnippet,
+        registeredAt: p.createdAt,
+      })),
+      note: 'This is the user\'s personal song preference context. Use it to personalize recommendations, understand their taste, and reference past conversations about songs.',
+    };
+    return { messages: [{ role: 'user', content: { type: 'text', text: JSON.stringify(summary, null, 2) } }] };
   }
   throw new Error(`Unknown prompt: ${req.params.name}`);
 });
