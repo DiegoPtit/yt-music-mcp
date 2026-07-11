@@ -17,18 +17,53 @@ function getDb() {
 }
 
 function migrateColumns() {
-  const cols = ['energy', 'danceability', 'valence', 'spotifyPopularity'];
   const existing = db.prepare("PRAGMA table_info(songs)").all().map(r => r.name);
+  const cols = ['energy', 'danceability', 'valence', 'spotifyPopularity'];
   for (const col of cols) {
     if (!existing.includes(col)) {
       const type = col === 'spotifyPopularity' ? 'INTEGER' : 'REAL';
       db.exec(`ALTER TABLE songs ADD COLUMN ${col} ${type}`);
     }
   }
+  const spotifyCols = [
+    { name: 'spotifyTrackId', type: 'TEXT' },
+    { name: 'spotifyEnergy', type: 'REAL' },
+    { name: 'spotifyDanceability', type: 'REAL' },
+    { name: 'spotifyValence', type: 'REAL' },
+    { name: 'spotifyTempo', type: 'REAL' },
+    { name: 'acousticness', type: 'REAL' },
+    { name: 'instrumentalness', type: 'REAL' },
+    { name: 'liveness', type: 'REAL' },
+    { name: 'speechiness', type: 'REAL' },
+  ];
+  for (const col of spotifyCols) {
+    if (!existing.includes(col.name)) {
+      db.exec(`ALTER TABLE songs ADD COLUMN ${col.name} ${col.type}`);
+    }
+  }
+}
+
+function migrateListenDates() {
+  const existing = db.prepare("PRAGMA table_info(listen_dates)").all().map(r => r.name);
+  const cols = [
+    { name: 'progress', type: 'REAL' },
+    { name: 'sessionId', type: 'TEXT' },
+    { name: 'activeApp', type: 'TEXT' },
+    { name: 'keystrokeRate', type: 'REAL' },
+    { name: 'cpuLoad', type: 'REAL' },
+    { name: 'memoryUsage', type: 'REAL' },
+    { name: 'weather', type: 'TEXT' },
+  ];
+  for (const col of cols) {
+    if (!existing.includes(col.name)) {
+      db.exec(`ALTER TABLE listen_dates ADD COLUMN ${col.name} ${col.type}`);
+    }
+  }
 }
 
 function initTables() {
   migrateColumns();
+  migrateListenDates();
   db.exec(`
     CREATE TABLE IF NOT EXISTS songs (
       videoId TEXT PRIMARY KEY,
@@ -55,6 +90,13 @@ function initTables() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       videoId TEXT NOT NULL,
       listenedAt TEXT NOT NULL,
+      progress REAL,
+      sessionId TEXT,
+      activeApp TEXT,
+      keystrokeRate REAL,
+      cpuLoad REAL,
+      memoryUsage REAL,
+      weather TEXT,
       FOREIGN KEY (videoId) REFERENCES songs(videoId)
     );
     CREATE TABLE IF NOT EXISTS genre_cache (
@@ -63,6 +105,7 @@ function initTables() {
     );
     CREATE INDEX IF NOT EXISTS idx_listen_dates_videoId ON listen_dates(videoId);
     CREATE INDEX IF NOT EXISTS idx_listen_dates_listenedAt ON listen_dates(listenedAt);
+    CREATE INDEX IF NOT EXISTS idx_listen_dates_sessionId ON listen_dates(sessionId);
     CREATE INDEX IF NOT EXISTS idx_songs_artist ON songs(artist);
     CREATE INDEX IF NOT EXISTS idx_songs_genre ON songs(genre);
     CREATE TABLE IF NOT EXISTS song_preferences (
@@ -78,6 +121,20 @@ function initTables() {
       lyricsSnippet TEXT,
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      startTime TEXT NOT NULL,
+      endTime TEXT,
+      songCount INTEGER DEFAULT 0,
+      energyStart REAL,
+      energyEnd REAL,
+      valenceStart REAL,
+      valenceEnd REAL,
+      genreSequence TEXT,
+      avgCpuLoad REAL,
+      weather TEXT,
+      contextSummary TEXT
     );
   `);
 }
@@ -124,16 +181,54 @@ function updateSpotifyData(videoId, data) {
     UPDATE songs SET
       genre = COALESCE(?, genre),
       bpm = COALESCE(?, bpm),
-      energy = ?,
-      danceability = ?,
-      valence = ?,
-      spotifyPopularity = ?
+      energy = COALESCE(?, energy),
+      danceability = COALESCE(?, danceability),
+      valence = COALESCE(?, valence),
+      spotifyPopularity = COALESCE(?, spotifyPopularity),
+      spotifyTrackId = COALESCE(?, spotifyTrackId),
+      spotifyEnergy = COALESCE(?, spotifyEnergy),
+      spotifyDanceability = COALESCE(?, spotifyDanceability),
+      spotifyValence = COALESCE(?, spotifyValence),
+      spotifyTempo = COALESCE(?, spotifyTempo),
+      acousticness = COALESCE(?, acousticness),
+      instrumentalness = COALESCE(?, instrumentalness),
+      liveness = COALESCE(?, liveness),
+      speechiness = COALESCE(?, speechiness)
     WHERE videoId = ?
-  `).run(data.genre, data.bpm, data.energy, data.danceability, data.valence, data.spotifyPopularity, videoId);
+  `).run(
+    data.genre ?? null,
+    data.bpm ?? null,
+    data.energy ?? null,
+    data.danceability ?? null,
+    data.valence ?? null,
+    data.spotifyPopularity ?? null,
+    data.spotifyTrackId ?? null,
+    data.spotifyEnergy ?? null,
+    data.spotifyDanceability ?? null,
+    data.spotifyValence ?? null,
+    data.spotifyTempo ?? null,
+    data.acousticness ?? null,
+    data.instrumentalness ?? null,
+    data.liveness ?? null,
+    data.speechiness ?? null,
+    videoId
+  );
 }
 
-function addListenDate(videoId, date) {
-  getDb().prepare('INSERT INTO listen_dates (videoId, listenedAt) VALUES (?, ?)').run(videoId, date);
+function addListenDate(videoId, date, context = {}) {
+  getDb().prepare(`
+    INSERT INTO listen_dates (videoId, listenedAt, progress, sessionId, activeApp, keystrokeRate, cpuLoad, memoryUsage, weather)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    videoId, date,
+    context.progress ?? null,
+    context.sessionId ?? null,
+    context.activeApp ?? null,
+    context.keystrokeRate ?? null,
+    context.cpuLoad ?? null,
+    context.memoryUsage ?? null,
+    context.weather ? JSON.stringify(context.weather) : null
+  );
 }
 
 function getAllSongs() {
@@ -172,7 +267,9 @@ function getStats() {
   const daysActive = d.prepare('SELECT COUNT(DISTINCT DATE(listenedAt)) as c FROM listen_dates').get().c;
   const totalBpm = d.prepare('SELECT COUNT(*) as c FROM songs WHERE bpm IS NOT NULL').get().c;
   const spotifyCount = d.prepare('SELECT COUNT(*) as c FROM songs WHERE energy IS NOT NULL').get().c;
-  return { totalSongs, totalPlays, totalMinutes: Math.round(totalMinutes / 60), likedSongs, daysActive, songsWithBpm: totalBpm, songsWithSpotify: spotifyCount };
+  const sessionCount = d.prepare('SELECT COUNT(*) as c FROM sessions').get().c;
+  const songsWithContext = d.prepare("SELECT COUNT(*) as c FROM listen_dates WHERE activeApp IS NOT NULL OR weather IS NOT NULL").get().c;
+  return { totalSongs, totalPlays, totalMinutes: Math.round(totalMinutes / 60), likedSongs, daysActive, songsWithBpm: totalBpm, songsWithSpotify: spotifyCount, sessionCount, songsWithContext };
 }
 
 function getHeatmapData(days = 30) {
@@ -199,6 +296,17 @@ function getWeeklyDistribution() {
     FROM listen_dates
     GROUP BY day ORDER BY day
   `).all();
+}
+
+function getDayHourMatrix(daysBack = 365) {
+  return getDb().prepare(`
+    SELECT CAST(strftime('%w', listenedAt) AS INTEGER) as dow,
+           CAST(strftime('%H', listenedAt) AS INTEGER) as hour,
+           COUNT(*) as count
+    FROM listen_dates
+    WHERE listenedAt >= DATE('now', ?)
+    GROUP BY dow, hour ORDER BY dow, hour
+  `).all(`-${daysBack} days`);
 }
 
 function getSongsByGenre(genre) {
@@ -378,11 +486,15 @@ function getStatsForPeriod(startDate, endDate) {
 }
 
 function getSongsWithoutSpotify(limit = 50) {
-  return getDb().prepare('SELECT * FROM songs WHERE energy IS NULL ORDER BY playCount DESC LIMIT ?').all(limit);
+  return getDb().prepare("SELECT * FROM songs WHERE spotifyTrackId IS NULL AND energy IS NULL ORDER BY playCount DESC LIMIT ?").all(limit);
 }
 
 function getHighEnergySongs(threshold = 0.7, limit = 20) {
-  return getDb().prepare('SELECT * FROM songs WHERE energy >= ? ORDER BY energy DESC LIMIT ?').all(threshold, limit);
+  return getDb().prepare('SELECT * FROM songs WHERE COALESCE(spotifyEnergy, energy) >= ? ORDER BY COALESCE(spotifyEnergy, energy) DESC LIMIT ?').all(threshold, limit);
+}
+
+function getSongsNeedingSpotifyAudio(limit = 50) {
+  return getDb().prepare("SELECT * FROM songs WHERE spotifyTrackId IS NULL AND (energy IS NOT NULL OR bpm IS NOT NULL) ORDER BY playCount DESC LIMIT ?").all(limit);
 }
 
 function getHighDanceabilitySongs(threshold = 0.7, limit = 20) {
@@ -418,16 +530,431 @@ function getAllPreferences() {
   return getDb().prepare('SELECT * FROM song_preferences ORDER BY updatedAt DESC').all();
 }
 
+function getProgressHistory(videoId, limit = 20) {
+  return getDb().prepare(`
+    SELECT progress, listenedAt FROM listen_dates
+    WHERE videoId = ? AND progress IS NOT NULL
+    ORDER BY listenedAt DESC LIMIT ?
+  `).all(videoId, limit);
+}
+
+function computeAffinityScore(playCount, avgProgress, daysSinceLastListen) {
+  const countFactor = Math.pow(playCount, 0.5);
+  const progressFactor = Math.pow(Math.min(avgProgress, 1), 1.5);
+  const recencyBoost = 1 + 0.3 * Math.exp(-daysSinceLastListen / 30);
+  return Math.round(countFactor * progressFactor * recencyBoost * 100) / 100;
+}
+
+function getAffinityScores(minScore = 0, limit = 50) {
+  const d = getDb();
+  const now = Date.now();
+  const songs = d.prepare(`
+    SELECT s.*, s.playCount as cnt, s.maxProgress as mp, s.lastListened as ll,
+    (SELECT COALESCE(AVG(ld2.progress), s.maxProgress) FROM listen_dates ld2 WHERE ld2.videoId = s.videoId AND ld2.progress IS NOT NULL) as avgProg
+    FROM songs s
+    WHERE s.playCount > 0
+    ORDER BY s.lastListened DESC
+  `).all();
+
+  return songs.map(s => {
+    const daysSinceLast = Math.max(0, (now - new Date(s.ll).getTime()) / 86400000);
+    const score = computeAffinityScore(s.cnt, s.avgProg || s.maxProgress || 0.5, daysSinceLast);
+    return {
+      videoId: s.videoId, title: s.title, artist: s.artist, genre: s.genre,
+      playCount: s.cnt, maxProgress: s.mp, avgProgress: s.avgProg || s.maxProgress,
+      affinityScore: score, daysSinceLastListened: Math.round(daysSinceLast),
+      lastListened: s.ll, energy: s.energy, valence: s.valence, bpm: s.bpm,
+    };
+  }).filter(s => s.affinityScore >= minScore).sort((a, b) => b.affinityScore - a.affinityScore).slice(0, limit);
+}
+
+function computeBurnoutStatus(videoId) {
+  const history = getProgressHistory(videoId, 15);
+  if (history.length < 3) return { videoId, status: 'insufficient_data', slope: 0 };
+
+  const values = history.map((h, i) => ({ x: i, y: h.progress }));
+  const n = values.length;
+  const sumX = values.reduce((s, v) => s + v.x, 0);
+  const sumY = values.reduce((s, v) => s + v.y, 0);
+  const sumXY = values.reduce((s, v) => s + v.x * v.y, 0);
+  const sumX2 = values.reduce((s, v) => s + v.x * v.x, 0);
+
+  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX) || 0;
+  const avgProgress = sumY / n;
+
+  let status = 'healthy';
+  if (slope < -0.02 && avgProgress < 0.7) status = 'fatigued';
+  else if (slope < -0.01) status = 'declining';
+
+  return { videoId, status, slope: Math.round(slope * 1000) / 1000, avgProgress: Math.round(avgProgress * 100) / 100, dataPoints: n };
+}
+
+function getSafeFavorites(minAffinity = 2, excludeFatigued = true, limit = 30) {
+  const songs = getAffinityScores(minAffinity, 100);
+  if (!excludeFatigued) return songs.slice(0, limit);
+
+  return songs.filter(s => {
+    const burnout = computeBurnoutStatus(s.videoId);
+    return burnout.status !== 'fatigued';
+  }).slice(0, limit);
+}
+
+function createSession(startTime, song, context = {}) {
+  const d = getDb();
+  const id = `session_${startTime.replace(/[^0-9]/g, '').slice(0, 14)}`;
+  const energyStart = song.energy || null;
+  const valenceStart = song.valence || null;
+  d.prepare(`
+    INSERT INTO sessions (id, startTime, songCount, energyStart, valenceStart, genreSequence, avgCpuLoad, weather, contextSummary)
+    VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)
+  `).run(id, startTime, energyStart, valenceStart,
+    JSON.stringify(song.genre ? [song.genre] : []),
+    context.cpuLoad ?? null,
+    context.weather ? JSON.stringify(context.weather) : null,
+    context.summary || null
+  );
+  return id;
+}
+
+function updateSession(sessionId, song) {
+  const d = getDb();
+  const session = d.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId);
+  if (!session) return;
+
+  let genres = [];
+  try { genres = JSON.parse(session.genreSequence || '[]'); } catch {}
+  if (song.genre && genres[genres.length - 1] !== song.genre) {
+    genres.push(song.genre);
+  }
+
+  d.prepare(`
+    UPDATE sessions SET
+      songCount = songCount + 1,
+      energyEnd = ?,
+      valenceEnd = ?,
+      genreSequence = ?
+    WHERE id = ?
+  `).run(song.energy || null, song.valence || null, JSON.stringify(genres), sessionId);
+}
+
+function closeSession(sessionId) {
+  const d = getDb();
+  const endTime = new Date().toISOString();
+  d.prepare('UPDATE sessions SET endTime = ? WHERE id = ?').run(endTime, sessionId);
+  const session = d.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId);
+  if (session) {
+    const duration = session.endTime && session.startTime
+      ? Math.round((new Date(session.endTime) - new Date(session.startTime)) / 60000)
+      : 0;
+    const genres = (() => { try { return JSON.parse(session.genreSequence || '[]'); } catch { return []; } })();
+    let summary = `${session.songCount} canciones en ${duration} min`;
+    if (genres.length > 0) summary += ` | ${genres.join(' → ')}`;
+    if (session.energyStart != null && session.energyEnd != null) {
+      const delta = (session.energyEnd - session.energyStart) * 100;
+      summary += ` | energía ${delta > 0 ? '+' : ''}${Math.round(delta)}%`;
+    }
+    d.prepare('UPDATE sessions SET contextSummary = ? WHERE id = ?').run(summary, sessionId);
+  }
+}
+
+function getSessions(limit = 20) {
+  return getDb().prepare('SELECT * FROM sessions ORDER BY startTime DESC LIMIT ?').all(limit);
+}
+
+function getSession(sessionId) {
+  return getDb().prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId);
+}
+
+function getCurrentSession() {
+  return getDb().prepare("SELECT * FROM sessions WHERE endTime IS NULL ORDER BY startTime DESC LIMIT 1").get();
+}
+
+function getSessionSongs(sessionId) {
+  return getDb().prepare(`
+    SELECT ld.*, s.title, s.artist, s.energy, s.valence, s.genre, s.bpm
+    FROM listen_dates ld
+    JOIN songs s ON ld.videoId = s.videoId
+    WHERE ld.sessionId = ?
+    ORDER BY ld.listenedAt ASC
+  `).all(sessionId);
+}
+
+function getSessionTrajectory(sessionId) {
+  const songs = getSessionSongs(sessionId);
+  if (songs.length < 2) return { sessionId, songCount: songs.length, trajectory: 'insufficient_data' };
+
+  const energyValues = songs.map(s => s.energy).filter(e => e != null);
+  const valenceValues = songs.map(s => s.valence).filter(v => v != null);
+
+  const calcSlope = (arr) => {
+    if (arr.length < 3) return 0;
+    const n = arr.length;
+    const sumX = arr.reduce((s, _, i) => s + i, 0);
+    const sumY = arr.reduce((s, v) => s + v, 0);
+    const sumXY = arr.reduce((s, v, i) => s + i * v, 0);
+    const sumX2 = arr.reduce((s, _, i) => s + i * i, 0);
+    return (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX) || 0;
+  };
+
+  const energySlope = energyValues.length >= 3 ? calcSlope(energyValues) : 0;
+  const valenceSlope = valenceValues.length >= 3 ? calcSlope(valenceValues) : 0;
+
+  let trajectory = 'stable';
+  if (energySlope < -0.05 && valenceSlope < -0.05) trajectory = 'winding_down';
+  else if (energySlope > 0.05 && valenceSlope > 0.05) trajectory = 'ramping_up';
+  else if (energySlope < -0.05) trajectory = 'calming';
+  else if (energySlope > 0.05) trajectory = 'energizing';
+
+  return {
+    sessionId,
+    songCount: songs.length,
+    trajectory,
+    energySlope: Math.round(energySlope * 1000) / 1000,
+    valenceSlope: Math.round(valenceSlope * 1000) / 1000,
+    energy: { start: energyValues[0], end: energyValues[energyValues.length - 1], avg: energyValues.length ? Math.round(energyValues.reduce((a, v) => a + v, 0) / energyValues.length * 100) / 100 : null },
+    valence: { start: valenceValues[0], end: valenceValues[valenceValues.length - 1], avg: valenceValues.length ? Math.round(valenceValues.reduce((a, v) => a + v, 0) / valenceValues.length * 100) / 100 : null },
+    genres: [...new Set(songs.map(s => s.genre).filter(Boolean))],
+    songs: songs.map(s => ({ title: s.title, artist: s.artist, genre: s.genre, energy: s.energy, valence: s.valence, listenedAt: s.listenedAt })),
+  };
+}
+
+function getSongsWithContext(limit = 30) {
+  return getDb().prepare(`
+    SELECT ld.*, s.title, s.artist, s.genre, s.energy, s.valence, s.bpm
+    FROM listen_dates ld
+    JOIN songs s ON ld.videoId = s.videoId
+    WHERE ld.activeApp IS NOT NULL OR ld.weather IS NOT NULL OR ld.cpuLoad IS NOT NULL
+    ORDER BY ld.listenedAt DESC LIMIT ?
+  `).all(limit);
+}
+
+function getContextRows(daysBack = 365) {
+  return getDb().prepare(`
+    SELECT s.bpm, s.energy, s.valence, s.danceability, s.genre,
+           ld.keystrokeRate, ld.cpuLoad, ld.memoryUsage, ld.activeApp, ld.weather,
+           CAST(strftime('%H', ld.listenedAt) AS INTEGER) as hour,
+           CAST(strftime('%w', ld.listenedAt) AS INTEGER) as dayOfWeek
+    FROM listen_dates ld
+    JOIN songs s ON ld.videoId = s.videoId
+    WHERE (ld.keystrokeRate IS NOT NULL OR ld.cpuLoad IS NOT NULL)
+      AND s.bpm IS NOT NULL
+      AND ld.listenedAt > DATE('now', ?)
+    ORDER BY ld.listenedAt DESC
+  `).all(`-${daysBack} days`);
+}
+
+function getCorrelationMatrix(periodDays = 365) {
+  const rows = getContextRows(periodDays);
+  if (rows.length < 5) return null;
+
+  const variables = ['bpm', 'energy', 'valence', 'danceability', 'keystrokeRate', 'cpuLoad', 'memoryUsage', 'hour'];
+  const labels = { bpm: 'BPM', energy: 'Energy', valence: 'Valence', danceability: 'Dance', keystrokeRate: 'Keys/s', cpuLoad: 'CPU', memoryUsage: 'RAM', hour: 'Hour' };
+  const icons = { bpm: '🎵', energy: '⚡', valence: '😊', danceability: '💃', keystrokeRate: '⌨️', cpuLoad: '🖥️', memoryUsage: '🧠', hour: '🕐' };
+
+  const matrix = {};
+  for (const v1 of variables) {
+    matrix[v1] = {};
+    for (const v2 of variables) {
+      if (v1 === v2) { matrix[v1][v2] = { r: 1, n: rows.length }; continue; }
+      const pairs = rows.filter(r => r[v1] != null && r[v2] != null).map(r => ({ x: Number(r[v1]), y: Number(r[v2]) }));
+      const n = pairs.length;
+      if (n < 5) { matrix[v1][v2] = { r: 0, n }; continue; }
+      const sumX = pairs.reduce((s, p) => s + p.x, 0);
+      const sumY = pairs.reduce((s, p) => s + p.y, 0);
+      const sumXY = pairs.reduce((s, p) => s + p.x * p.y, 0);
+      const sumX2 = pairs.reduce((s, p) => s + p.x * p.x, 0);
+      const sumY2 = pairs.reduce((s, p) => s + p.y * p.y, 0);
+      const denom = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
+      const r = denom === 0 ? 0 : (n * sumXY - sumX * sumY) / denom;
+      matrix[v1][v2] = { r: Math.round(Math.max(-1, Math.min(1, r)) * 1000) / 1000, n };
+    }
+  }
+
+  return {
+    variables: variables.map(v => ({ key: v, label: labels[v], icon: icons[v] })),
+    matrix,
+    sampleSize: rows.length,
+  };
+}
+
+function getWeatherProfile(weatherCondition) {
+  if (!weatherCondition) return null;
+  const d = getDb();
+  const rows = d.prepare(`
+    SELECT s.energy, s.valence, s.bpm, s.danceability
+    FROM listen_dates ld
+    JOIN songs s ON ld.videoId = s.videoId
+    WHERE ld.weather LIKE ? AND s.energy IS NOT NULL
+    ORDER BY ld.listenedAt DESC LIMIT 100
+  `).all(`%${weatherCondition}%`);
+  if (rows.length < 3) return null;
+
+  const energy = rows.map(r => r.energy).filter(Boolean);
+  const valence = rows.map(r => r.valence).filter(Boolean);
+  const bpm = rows.map(r => r.bpm).filter(Boolean);
+
+  return {
+    condition: weatherCondition,
+    sampleSize: rows.length,
+    avgEnergy: Math.round(energy.reduce((a, v) => a + v, 0) / energy.length * 100) / 100,
+    avgValence: Math.round(valence.reduce((a, v) => a + v, 0) / valence.length * 100) / 100,
+    avgBpm: bpm.length ? Math.round(bpm.reduce((a, v) => a + v, 0) / bpm.length) : null,
+  };
+}
+
+function getHourProfile(hour) {
+  const d = getDb();
+  const rows = d.prepare(`
+    SELECT s.energy, s.valence, s.bpm, s.danceability
+    FROM listen_dates ld
+    JOIN songs s ON ld.videoId = s.videoId
+    WHERE CAST(strftime('%H', ld.listenedAt) AS INTEGER) = ? AND s.energy IS NOT NULL
+    ORDER BY ld.listenedAt DESC LIMIT 100
+  `).all(hour);
+  if (rows.length < 3) return null;
+
+  const energy = rows.map(r => r.energy).filter(Boolean);
+  const valence = rows.map(r => r.valence).filter(Boolean);
+  const bpm = rows.map(r => r.bpm).filter(Boolean);
+
+  return {
+    hour,
+    sampleSize: rows.length,
+    avgEnergy: Math.round(energy.reduce((a, v) => a + v, 0) / energy.length * 100) / 100,
+    avgValence: Math.round(valence.reduce((a, v) => a + v, 0) / valence.length * 100) / 100,
+    avgBpm: bpm.length ? Math.round(bpm.reduce((a, v) => a + v, 0) / bpm.length) : null,
+  };
+}
+
+function getFlowProfile(appCategory) {
+  const d = getDb();
+  // Map common app keywords to category
+  const like = appCategory === 'coding'
+    ? '%code%' : appCategory === 'terminal'
+    ? '%term%' : appCategory === 'browser'
+    ? '%firefox%' : `%${appCategory.slice(0, 4)}%`;
+
+  const rows = d.prepare(`
+    SELECT s.bpm, s.energy, s.valence, s.danceability, s.genre, ld.keystrokeRate, ld.activeApp
+    FROM listen_dates ld
+    JOIN songs s ON ld.videoId = s.videoId
+    WHERE ld.activeApp LIKE ? AND ld.keystrokeRate IS NOT NULL AND s.bpm IS NOT NULL
+    ORDER BY ld.keystrokeRate DESC
+  `).all(like);
+
+  if (rows.length < 5) return null;
+
+  const sorted = [...rows].sort((a, b) => b.keystrokeRate - a.keystrokeRate);
+  const topN = Math.max(5, Math.ceil(sorted.length * 0.25));
+  const flowData = sorted.slice(0, topN);
+
+  const bpmVals = flowData.map(r => r.bpm).filter(Boolean);
+  const energyVals = flowData.map(r => r.energy).filter(Boolean);
+  const valenceVals = flowData.map(r => r.valence).filter(Boolean);
+
+  const avg = arr => arr.reduce((a, v) => a + v, 0) / arr.length;
+
+  return {
+    appCategory,
+    sampleSize: rows.length,
+    flowDataPoints: topN,
+    bpm: {
+      min: Math.round(Math.min(...bpmVals)),
+      max: Math.round(Math.max(...bpmVals)),
+      avg: Math.round(avg(bpmVals)),
+    },
+    energy: {
+      min: Math.round(Math.min(...energyVals) * 100) / 100,
+      max: Math.round(Math.max(...energyVals) * 100) / 100,
+      avg: Math.round(avg(energyVals) * 100) / 100,
+    },
+    valence: {
+      min: Math.round(Math.min(...valenceVals) * 100) / 100,
+      max: Math.round(Math.max(...valenceVals) * 100) / 100,
+      avg: Math.round(avg(valenceVals) * 100) / 100,
+    },
+    genres: [...new Set(flowData.map(r => r.genre).filter(Boolean))].slice(0, 5),
+  };
+}
+
+function getScatterData(metricX, metricY, periodDays = 365) {
+  const isSongMetric = ['bpm', 'energy', 'valence', 'danceability'].includes(metricX) || ['bpm', 'energy', 'valence', 'danceability'].includes(metricY);
+  const rows = getDb().prepare(`
+    SELECT ${['bpm', 'energy', 'valence', 'danceability'].map(c => `s.${c}`).join(', ')},
+           ld.keystrokeRate, ld.cpuLoad, ld.memoryUsage,
+           CAST(strftime('%H', ld.listenedAt) AS INTEGER) as hour
+    FROM listen_dates ld
+    JOIN songs s ON ld.videoId = s.videoId
+    WHERE ${isSongMetric ? 's.bpm IS NOT NULL AND' : ''} (ld.cpuLoad IS NOT NULL OR ld.keystrokeRate IS NOT NULL)
+      AND ld.listenedAt > DATE('now', ?)
+    ORDER BY ld.listenedAt DESC
+  `).all(`-${periodDays} days`);
+  const pairs = rows
+    .filter(r => r[metricX] != null && r[metricY] != null)
+    .map(r => ({ x: Number(r[metricX]), y: Number(r[metricY]) }));
+  if (pairs.length < 3) return null;
+
+  // Compute regression line
+  const n = pairs.length;
+  const sumX = pairs.reduce((s, p) => s + p.x, 0);
+  const sumY = pairs.reduce((s, p) => s + p.y, 0);
+  const sumXY = pairs.reduce((s, p) => s + p.x * p.y, 0);
+  const sumX2 = pairs.reduce((s, p) => s + p.x * p.x, 0);
+  const sumY2 = pairs.reduce((s, p) => s + p.y * p.y, 0);
+  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX) || 0;
+  const intercept = (sumY - slope * sumX) / n;
+  const denom = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
+  const pearsonR = denom === 0 ? 0 : (n * sumXY - sumX * sumY) / denom;
+
+  const xMin = Math.min(...pairs.map(p => p.x));
+  const xMax = Math.max(...pairs.map(p => p.x));
+
+  return {
+    metricX, metricY,
+    n,
+    points: pairs.slice(0, 500),
+    regression: {
+      slope: Math.round(slope * 1000) / 1000,
+      intercept: Math.round(intercept * 1000) / 1000,
+      r: Math.round(Math.max(-1, Math.min(1, pearsonR)) * 1000) / 1000,
+      rSquared: Math.round(pearsonR * pearsonR * 1000) / 1000,
+      line: [
+        { x: xMin, y: Math.round((slope * xMin + intercept) * 1000) / 1000 },
+        { x: xMax, y: Math.round((slope * xMax + intercept) * 1000) / 1000 },
+      ],
+    },
+  };
+}
+
+function getContextMetricsHistory(limit = 100) {
+  return getDb().prepare(`
+    SELECT ld.listenedAt, s.title, s.artist, s.bpm, s.energy, s.valence,
+           ld.keystrokeRate, ld.cpuLoad, ld.memoryUsage, ld.activeApp, ld.progress
+    FROM listen_dates ld
+    JOIN songs s ON ld.videoId = s.videoId
+    WHERE ld.keystrokeRate IS NOT NULL
+    ORDER BY ld.listenedAt DESC LIMIT ?
+  `).all(limit);
+}
+
 module.exports = {
   getDb, upsertSong, addListenDate, getAllSongs, getSong,
   getTopSongs, getTopArtists, getTopGenres, getStats,
-  getHeatmapData, getHourlyDistribution, getWeeklyDistribution,
+  getHeatmapData, getHourlyDistribution, getWeeklyDistribution, getDayHourMatrix,
   getSongsByGenre, getSongsNotListenedSince, getArtistsNotListenedSince,
   getObsessions, getRecentSongs, getSongsByArtist, getSongsInPeriod,
   searchSongs, getGenreCache, setGenreCache, updateSongGenre,
   updateSongBpm, updateSongLikeState, updateSongViews,
   close, estimateBpm, fetchBpmFromMusicBrainz,
   getLikedSongs, getStatsForPeriod, updateSpotifyData,
-  getSongsWithoutSpotify, getHighEnergySongs, getHighDanceabilitySongs,
+  getSongsWithoutSpotify, getHighEnergySongs, getHighDanceabilitySongs, getSongsNeedingSpotifyAudio,
   saveSongPreference, getSongPreferences, getAllPreferences,
+  getProgressHistory, computeAffinityScore, getAffinityScores,
+  computeBurnoutStatus, getSafeFavorites,
+  createSession, updateSession, closeSession,
+  getSessions, getSession, getCurrentSession,
+  getSessionSongs, getSessionTrajectory,
+  getSongsWithContext,
+  getCorrelationMatrix, getFlowProfile, getWeatherProfile,
+  getHourProfile, getScatterData, getContextMetricsHistory,
 };

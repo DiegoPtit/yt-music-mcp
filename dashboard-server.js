@@ -63,7 +63,9 @@ const router = {
       const songs = periodSongs(p);
       const totalPlays = songs.reduce((a, s) => a + s.plays, 0);
       const totalMinutes = songs.reduce((a, s) => a + (s.duration || 0) * s.plays, 0);
-      return { totalSongs: songs.length, totalPlays, totalMinutes: Math.round(totalMinutes / 60), likedSongs: 0, daysActive: 1, songsWithBpm: songs.filter(s => s.bpm).length };
+      const today2 = new Date().toISOString().split('T')[0];
+      const sessionCount = db.getDb().prepare("SELECT COUNT(*) as c FROM sessions WHERE DATE(startTime) = ?").get(today2).c;
+      return { totalSongs: songs.length, totalPlays, totalMinutes: Math.round(totalMinutes / 60), likedSongs: 0, daysActive: 1, songsWithBpm: songs.filter(s => s.bpm).length, sessionCount };
     }
     return db.getStats();
   },
@@ -115,6 +117,7 @@ const router = {
       data: db.getHeatmapData(p.daysBack),
       hourly: db.getHourlyDistribution(),
       weekly: db.getWeeklyDistribution(),
+      dayHour: db.getDayHourMatrix(p.daysBack),
       todayHourly,
     };
   },
@@ -142,7 +145,10 @@ const router = {
       if (!res.ok) return { playing: false };
       const song = await res.json();
       if (!song?.videoId) return { playing: false };
-      return { playing: true, title: song.title, artist: song.artist, videoId: song.videoId, elapsed: song.elapsedSeconds, duration: song.songDuration };
+      const dbSong = db.getDb().prepare('SELECT bpm FROM songs WHERE videoId = ?').get(song.videoId);
+      let bpm = dbSong?.bpm || null;
+      if (!bpm && song.songDuration) bpm = db.estimateBpm(song.songDuration);
+      return { playing: true, title: song.title, artist: song.artist, videoId: song.videoId, bpm, elapsed: song.elapsedSeconds, duration: song.songDuration };
     } catch { return { playing: false }; }
   },
 
@@ -157,6 +163,41 @@ const router = {
   '/api/revival': () => {
     const songs = db.getSongsNotListenedSince(30);
     return { total: songs.length, songs: songs.slice(0, 10).map(s => ({ title: s.title, artist: s.artist, playCount: s.playCount, lastListened: s.lastListened })) };
+  },
+
+  '/api/correlations': (url) => {
+    const p = parsePeriod(url);
+    return db.getCorrelationMatrix(p.daysBack);
+  },
+
+  '/api/flow-profile': (url) => {
+    const u = new URL(url, 'http://localhost');
+    const app = u.searchParams.get('app') || 'coding';
+    return db.getFlowProfile(app);
+  },
+
+  '/api/scatter': (url) => {
+    const p = parsePeriod(url);
+    const u = new URL(url, 'http://localhost');
+    const x = u.searchParams.get('x') || 'bpm';
+    const y = u.searchParams.get('y') || 'cpuLoad';
+    return db.getScatterData(x, y, p.daysBack);
+  },
+
+  '/api/metrics': () => db.getContextMetricsHistory(200),
+
+  '/api/hour-profiles': () => {
+    const profiles = [];
+    for (let h = 0; h < 24; h++) {
+      const p = db.getHourProfile(h);
+      if (p) profiles.push(p);
+    }
+    return profiles;
+  },
+
+  '/api/weather-profiles': () => {
+    const conditions = ['clear', 'cloudy', 'rain', 'drizzle', 'thunderstorm', 'foggy', 'overcast'];
+    return conditions.map(c => db.getWeatherProfile(c)).filter(Boolean);
   },
 };
 

@@ -2,7 +2,7 @@
 
 MCP server + listening history tracker for [th-ch/youtube-music](https://github.com/th-ch/youtube-music).
 
-Control YouTube Music from opencode, Claude Desktop, or any MCP client. Play songs, create mixes, query listening stats, get recommendations based on your actual listening history — all backed by a SQLite database with genre, mood, and BPM enrichment via Last.fm.
+Control YouTube Music from opencode, Claude Desktop, or any MCP client. Play songs, create mixes, query listening stats, get recommendations based on your actual listening history — all backed by a SQLite database with genre, mood, and audio features (energy, danceability, valence, BPM, acousticness) enriched via Last.fm + Deezer audio analysis.
 
 ---
 
@@ -45,10 +45,6 @@ YT_MUSIC_AUTH=your_api_server_auth
 
 LASTFM_API_KEY=your_lastfm_api_key
 LASTFM_API_SECRET=your_lastfm_api_secret
-
-SPOTIFY_CLIENT_ID=your_spotify_client_id
-SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
-SPOTIFY_REDIRECT_URI=http://127.0.0.1:8888/callback
 
 DASHBOARD_PORT=3456
 TRACKER_THRESHOLD=45
@@ -119,14 +115,25 @@ For other MCP clients (Claude Desktop, etc.), configure the command `node /path/
 | `ytm_stats` | Statistics: total songs, genres, top artists |
 | `ytm_recommend` | Recommendations based on your actual listening history |
 | `ytm_wrapped` | Weekly/monthly wrapped summary (like Spotify Wrapped) |
-| `ytm_similar_to` | Similar songs from your history (same artist + same genre) |
+| `ytm_similar_to` | Similar songs by euclidean distance in 5D feature space (energy, danceability, valence, BPM, acousticness) — fallback to genre+artist |
 | `ytm_obsessions` | Songs you are obsessing over (many plays in short period) |
 | `ytm_revival` | Songs you used to love but haven't listened to in 30+ days |
 
-### Smart Playlists
+### AI-Powered Tools (based on audio features)
 
 | Tool | Description |
 |------|-------------|
+| `ytm_flow_state` | Flow state songs for coding/reading/terminal — filters by BPM, energy, excludes fatigued |
+| `ytm_mood_playlist` | Playlist by mood: happy, chill, energetic, focused, sad — uses energy/valence/BPM/acousticness ranges |
+| `ytm_burnout_report` | Detects song fatigue (declining progress trend) — auto-injected in session_next context |
+| `ytm_smart_playlist` | K-means++ clustering in 5D feature space — cluster names: party, chill, energy, melancholic, etc. |
+| `ytm_time_profile` | Listening profile by hour of day and time segment (madrugada/mañana/tarde/noche) |
+
+### Smart Playlists (weather, vibe, party)
+
+| Tool | Description |
+|------|-------------|
+| `ytm_session_next` | **Main recommendation engine** — accepts `mood`, `vibe`, `genre`, `bpmRange`, `energyLevel`, `mode=history/discover` |
 | `ytm_vibe_play` | Auto-mix based on current hour/day patterns from your history |
 | `ytm_discover_weekly` | Discover new songs from your top genres on YT Music |
 | `ytm_weather_play` | Playlist by vibe (morning/afternoon/night/rainy/sunny/chill) |
@@ -218,14 +225,26 @@ The tracker, MCP server, and dashboard are independent processes. Use any combin
 
 ## Data Enrichment
 
-When a song crosses the playback threshold, the tracker:
+When a song crosses the playback threshold, the tracker runs **two parallel enrichment pipelines** asynchronously:
 
-1. **Records** it to SQLite (`songs` + `listen_dates` tables)
-2. **Enriches** via Last.fm API — fetches track/artist tags, maps mood tags to energy/danceability/valence (0–1 scale), extracts genre
-3. **Estimates BPM** — tries MusicBrainz recording tags first, falls back to duration-based heuristic
-4. **Updates genre** cache for future lookups
+### Pipeline 1: Last.fm (tags → mood)
+- Fetches track + artist tags via `track.getInfo` and `artist.getInfo`
+- Maps ~100 mood tags to energy/danceability/valence (0–1) via `MOOD_MAP`
+- Extracts genre from prioritized list of ~50 known genres
 
-All enrichment runs asynchronously — the tracker never blocks on external APIs.
+### Pipeline 2: Deezer + Essentia.js (audio analysis)
+- Searches Deezer API (no auth required) for the track
+- Downloads 30-second MP3 preview
+- Decodes to raw PCM via ffmpeg (22050Hz, mono, f32le)
+- Analyzes with Essentia.js WASM + custom JS algorithms:
+  - **BPM:** Autocorrelation + peak detection with harmonic skip
+  - **Energy:** RMS × dynamic range factor
+  - **Danceability:** Peak interval regularity (coefficient of variation)
+  - **Valence:** Brightness variance + low-energy ratio
+  - **Acousticness:** Spectral centroid + low-energy ratio
+- Falls back to JS-only algorithms when Essentia WASM methods crash (RhythmExtractor2013, OnsetRate)
+
+**Coverage:** 162/179 songs with energy/valence/danceability, 158 with acousticness (90%+).
 
 ---
 
@@ -233,5 +252,6 @@ All enrichment runs asynchronously — the tracker never blocks on external APIs
 
 - **Native API integration**: communicates with th-ch/youtube-music's built-in API server, no scraping
 - **Real listening context**: recommendations and smart playlists use your actual history
-- **Mood detection**: genre tags from Last.fm map to estimated energy, danceability, and valence
+- **Mood detection**: genre tags from Last.fm + audio analysis via Deezer/Essentia.js — energy, danceability, valence, BPM, acousticness
+- **6 AI personalization tools**: flow state, mood playlists, burnout detection, smart clustering, time profiling, similarity search in 5D feature space
 - **Dual purpose**: MCP server for AI agents + CLI for humans + web dashboard for visual browsing

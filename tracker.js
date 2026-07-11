@@ -5,9 +5,24 @@ const POLL_INTERVAL = parseInt(process.env.TRACKER_POLL_INTERVAL) || 2000;
 const THRESHOLD = (parseInt(process.env.TRACKER_THRESHOLD) || 45) / 100;
 const db = require('./db');
 const lastfm = require('./lastfm');
+const spotifyAudio = require('./spotify-audio');
+const os = require('os');
+const { execSync, spawn } = require('child_process');
 
 let token = null;
 let currentSong = null;
+
+let weatherCache = { data: null, fetchedAt: 0 };
+const WEATHER_CACHE_TTL = 30 * 60 * 1000;
+
+let lastKeystrokeCount = 0;
+let keystrokeSampleTime = 0;
+let activeSessionId = null;
+let sessionInactiveCount = 0;
+const SESSION_TIMEOUT_POLLS = 30;
+
+const LATITUDE = process.env.LATITUDE || '8.6206';
+const LONGITUDE = process.env.LONGITUDE || '-70.2310';
 
 async function getToken() {
   try {
@@ -34,6 +49,94 @@ async function api(endpoint) {
     console.error(`[yt-history] API error ${endpoint}:`, e.message);
     return null;
   }
+}
+
+function getActiveWindow() {
+  try {
+    const result = execSync('gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/shell/extensions/FocusedWindow --method org.gnome.shell.extensions.FocusedWindow.Get 2>/dev/null', { timeout: 2000, encoding: 'utf8' });
+    const match = result.match(/"title":"([^"]+)"/);
+    if (match) return match[1].trim().toLowerCase();
+  } catch {}
+  try {
+    const result = execSync('xdotool getactivewindow getwindowname 2>/dev/null', { timeout: 1000, encoding: 'utf8' });
+    if (result.trim()) return result.trim().toLowerCase();
+  } catch {}
+  return null;
+}
+
+function getKeystrokeRate() {
+  try {
+    const interrupts = execSync('grep i8042 /proc/interrupts 2>/dev/null', { timeout: 1000, encoding: 'utf8' });
+    if (!interrupts.trim()) return null;
+    const parts = interrupts.trim().split(/\s+/);
+    const counts = parts.map(Number).filter(n => Number.isFinite(n));
+    const total = counts.reduce((a, v) => a + v, 0);
+    const now = Date.now();
+    if (lastKeystrokeCount > 0 && keystrokeSampleTime > 0) {
+      const deltaTime = (now - keystrokeSampleTime) / 1000;
+      if (deltaTime > 0) {
+        const rate = (total - lastKeystrokeCount) / deltaTime;
+        lastKeystrokeCount = total;
+        keystrokeSampleTime = now;
+        return Math.round(rate * 10) / 10;
+      }
+    }
+    lastKeystrokeCount = total;
+    keystrokeSampleTime = now;
+    return null;
+  } catch {}
+  return null;
+}
+
+function getCpuLoad() {
+  return os.loadavg()[0];
+}
+
+function getMemoryUsage() {
+  return 1 - os.freemem() / os.totalmem();
+}
+
+async function getWeather() {
+  const now = Date.now();
+  if (weatherCache.data && (now - weatherCache.fetchedAt) < WEATHER_CACHE_TTL) {
+    return weatherCache.data;
+  }
+  try {
+    const res = await fetch(
+      `https://api.open-meteo.com/v1/forecast?latitude=${LATITUDE}&longitude=${LONGITUDE}&current_weather=true`,
+      { signal: AbortSignal.timeout(5000) }
+    );
+    if (!res.ok) return weatherCache.data;
+    const data = await res.json();
+    if (data?.current_weather) {
+      const w = data.current_weather;
+      const weatherCode = w.weathercode;
+      const conditions = {
+        0: 'clear', 1: 'clear', 2: 'cloudy', 3: 'overcast',
+        45: 'foggy', 48: 'foggy',
+        51: 'drizzle', 53: 'drizzle', 55: 'drizzle',
+        56: 'drizzle', 57: 'drizzle',
+        61: 'rain', 63: 'rain', 65: 'heavy rain',
+        66: 'rain', 67: 'rain',
+        71: 'snow', 73: 'snow', 75: 'heavy snow',
+        77: 'snow',
+        80: 'rain showers', 81: 'rain showers', 82: 'violent rain',
+        85: 'snow showers', 86: 'snow showers',
+        95: 'thunderstorm', 96: 'thunderstorm', 99: 'severe thunderstorm',
+      };
+      const result = {
+        condition: conditions[weatherCode] || 'unknown',
+        tempC: w.temperature,
+        windKmh: w.windspeed,
+        isDay: w.is_day === 1,
+        weatherCode,
+        fetchedAt: new Date().toISOString(),
+      };
+      weatherCache = { data: result, fetchedAt: now };
+      return result;
+    }
+  } catch {}
+  return weatherCache.data;
 }
 
 function extractGenreFromTags(tags, title, artist) {
@@ -217,8 +320,32 @@ async function fetchBpm(artist, title, duration) {
   return db.estimateBpm(duration);
 }
 
+function categorizeApp(appName) {
+  if (!appName) return 'unknown';
+  const app = appName.toLowerCase();
+  if (app.includes('code') || app.includes('cursor') || app.includes('vim') || app.includes('neovim') || app.includes('emacs') || app.includes('sublime') || app.includes('jetbrains') || app.includes('idea')) return 'coding';
+  if (app.includes('terminal') || app.includes('konsole') || app.includes('gnome-terminal') || app.includes('kitty') || app.includes('alacritty') || app.includes('bash') || app.includes('zsh') || app.includes('tmux') || app.includes('blackbox')) return 'terminal';
+  if (app.includes('firefox') || app.includes('chrome') || app.includes('chromium') || app.includes('brave') || app.includes('edge') || app.includes('opera')) return 'browser';
+  if (app.includes('spotify') || app.includes('youtube music') || app.includes('vlc') || app.includes('rhythmbox')) return 'music';
+  if (app.includes('slack') || app.includes('discord') || app.includes('telegram') || app.includes('whatsapp') || app.includes('signal')) return 'communication';
+  if (app.includes('libreoffice') || app.includes('word') || app.includes('excel') || app.includes('powerpoint') || app.includes('docs') || app.includes('sheets')) return 'office';
+  if (app.includes('nemo') || app.includes('nautilus') || app.includes('dolphin') || app.includes('thunar')) return 'file_manager';
+  return 'other';
+}
+
 let genrePromise = null;
 let bpmPromise = null;
+
+async function collectContext() {
+  const [activeApp, cpuLoad, memoryUsage, weather] = await Promise.all([
+    Promise.resolve().then(() => getActiveWindow()),
+    Promise.resolve().then(() => getCpuLoad()),
+    Promise.resolve().then(() => getMemoryUsage()),
+    getWeather(),
+  ]);
+  const keystrokeRate = getKeystrokeRate();
+  return { activeApp, keystrokeRate, cpuLoad, memoryUsage, weather };
+}
 
 async function poll() {
   if (!token) {
@@ -270,6 +397,25 @@ async function poll() {
 
     const listenDate = new Date().toISOString();
 
+    const context = await collectContext();
+
+    if (!activeSessionId) {
+      activeSessionId = db.createSession(listenDate, {
+        energy: currentSong.energy, valence: currentSong.valence, genre: currentSong.genre,
+      }, {
+        cpuLoad: context.cpuLoad, weather: context.weather,
+        summary: `Started by: ${currentSong.title} - ${currentSong.artist}`,
+      });
+      sessionInactiveCount = 0;
+      console.log(`[session] Started session ${activeSessionId}`);
+    } else {
+      sessionInactiveCount = 0;
+      db.updateSession(activeSessionId, {
+        energy: currentSong.energy, valence: currentSong.valence, genre: currentSong.genre,
+      });
+    }
+    context.sessionId = activeSessionId;
+
     setTimeout(async () => {
       let finalProgress = currentSong?.maxProgress || progress;
       finalProgress = Math.min(finalProgress, 1);
@@ -293,7 +439,20 @@ async function poll() {
         lastListened: listenDate,
       };
       db.upsertSong(songData);
-      db.addListenDate(videoId, listenDate);
+      db.addListenDate(videoId, listenDate, {
+        progress: finalProgress,
+        sessionId: context.sessionId,
+        activeApp: context.activeApp,
+        keystrokeRate: context.keystrokeRate,
+        cpuLoad: context.cpuLoad,
+        memoryUsage: context.memoryUsage,
+        weather: context.weather,
+      });
+
+      if (context.activeApp) {
+        const category = categorizeApp(context.activeApp);
+        console.log(`[context] app=${context.activeApp} (${category}) cpu=${context.cpuLoad?.toFixed(2)} mem=${(context.memoryUsage * 100).toFixed(0)}% keys=${context.keystrokeRate ?? '?'}/s${context.weather ? ` weather=${context.weather.condition} ${context.weather.tempC}°C` : ''}`);
+      }
 
       lastfm.enrichSong(artist, title).then(data => {
         if (data && (data.genre || data.energy != null)) {
@@ -310,11 +469,42 @@ async function poll() {
         }
       }).catch(() => {});
 
+      spotifyAudio.enrichSong(artist, title).then(spData => {
+        if (spData) {
+          db.updateSpotifyData(videoId, {
+            genre: null, bpm: spData.tempo ?? null,
+            energy: spData.energy ?? null,
+            danceability: spData.danceability ?? null,
+            valence: spData.valence ?? null,
+            spotifyPopularity: spData.popularity ?? null,
+            spotifyTrackId: spData.spotifyTrackId ?? null,
+            spotifyEnergy: spData.energy ?? null,
+            spotifyDanceability: spData.danceability ?? null,
+            spotifyValence: spData.valence ?? null,
+            spotifyTempo: spData.tempo ?? null,
+            acousticness: spData.acousticness ?? null,
+            instrumentalness: spData.instrumentalness ?? null,
+            liveness: spData.liveness ?? null,
+            speechiness: spData.speechiness ?? null,
+          });
+          console.log(`[spotify-audio] ${title} - ${artist} → e=${spData.energy?.toFixed(2)} v=${spData.valence?.toFixed(2)} d=${spData.danceability?.toFixed(2)} ${spData.tempo ? spData.tempo.toFixed(0) + 'bpm' : ''}`);
+        }
+      }).catch(() => {});
+
       const genreTag = currentSong?.genre ? ` [${currentSong.genre}]` : '';
       const likeTag = currentSong?.likeState === 'LIKE' ? ' ♥' : currentSong?.likeState === 'DISLIKE' ? ' ⊘' : '';
       const bpmTag = currentSong?.bpm ? ` ${currentSong.bpm}bpm` : '';
       console.log(`[yt-history] ✓ ${title} - ${artist}${genreTag}${bpmTag}${likeTag} (${Math.round(finalProgress * 100)}%)`);
     }, 3000);
+  } else if (songChanged && activeSessionId) {
+    sessionInactiveCount++;
+    if (sessionInactiveCount >= SESSION_TIMEOUT_POLLS) {
+      db.closeSession(activeSessionId);
+      const session = db.getSession(activeSessionId);
+      console.log(`[session] Closed session ${activeSessionId}: ${session?.contextSummary || session?.songCount + ' songs'}`);
+      activeSessionId = null;
+      sessionInactiveCount = 0;
+    }
   }
 
   currentSong.progress = progress;
@@ -322,9 +512,16 @@ async function poll() {
 }
 
 console.log('[yt-history] Starting YouTube Music history tracker (SQLite)');
+console.log('[yt-history] Context collection: active window, keystrokes, CPU, memory, weather');
 console.log(`[yt-history] Threshold: ${THRESHOLD * 100}%, Poll: ${POLL_INTERVAL}ms`);
 console.log(`[yt-history] DB: ${db.getDb().name}`);
 poll();
 
-process.on('SIGINT', () => { db.close(); process.exit(0); });
-process.on('SIGTERM', () => { db.close(); process.exit(0); });
+process.on('SIGINT', () => {
+  if (activeSessionId) db.closeSession(activeSessionId);
+  db.close(); process.exit(0);
+});
+process.on('SIGTERM', () => {
+  if (activeSessionId) db.closeSession(activeSessionId);
+  db.close(); process.exit(0);
+});

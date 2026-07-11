@@ -3,405 +3,620 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>yt wrapped</title>
+<title>yt-music dashboard</title>
 <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
 <style>
-  :root {
-    --bg: #0a0a0a;
-    --card: #111;
-    --accent: #00ff41;
-    --text: #eee;
-    --text-dim: #666;
-    --border: #1a1a1a;
-    --radius: 14px;
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { height: 100%; overflow: hidden; background: var(--bg); }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: var(--text); }
+:root {
+  --bg: #0a0a0a; --card: #111; --accent: #00ff41; --text: #eee;
+  --dim: #555; --border: #1a1a1a; --radius: 10px; --shadow: 0 0 20px rgba(0,255,65,.04);
+  --neg: #ff3355; --pos: #00ff41; --zero: #333;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html,body { height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; overflow-x: hidden; }
+#app { max-width: 1400px; margin: 0 auto; padding: 10px 12px; min-height: 100dvh; }
 
-  #app { height: 100dvh; display: flex; flex-direction: column; max-width: 500px; margin: 0 auto; }
+.top-bar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.logo { font-size: 1.1rem; font-weight: 900; color: var(--accent); letter-spacing: -.03em; }
+.now-mini { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.now-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.now-dot.on { background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+.now-dot.beat { animation: beat var(--bpm-dur, 0.5s) ease-in-out infinite; animation-delay: var(--bpm-delay, 0s); }
+.now-dot.off { background: var(--dim); animation: none; }
+@keyframes beat { 0%,100%{transform:scale(1);opacity:.7} 50%{transform:scale(1.6);opacity:1;box-shadow:0 0 16px var(--accent)} }
+.now-info { font-size: .82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.now-info strong { font-weight: 600; }
+.now-info .art { color: var(--dim); }
+.period-group { display: flex; gap: 2px; background: var(--card); border-radius: 8px; padding: 2px; border: 1px solid var(--border); flex-shrink: 0; }
+.period-group button { background: none; border: none; color: var(--dim); padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: .65rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; transition: all .15s; }
+.period-group button.on { background: var(--accent); color: #000; }
 
-  .top-bar { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px 0; flex-shrink: 0; }
-  .logo { font-size: 1.2rem; font-weight: 900; color: var(--accent); letter-spacing: -.03em; }
-  .chip-group { display: flex; gap: 3px; background: var(--card); border-radius: 10px; padding: 3px; border: 1px solid var(--border); }
-  .chip { background: none; border: none; color: var(--text-dim); padding: 5px 10px; border-radius: 7px; cursor: pointer; font-size: .7rem; font-weight: 600; transition: all .15s; text-transform: uppercase; letter-spacing: .03em; }
-  .chip.active { background: var(--accent); color: #000; }
+.dash { display: grid; grid-template-columns: 1fr; gap: 8px; }
+@media (min-width: 700px) { .dash { grid-template-columns: 1fr 1fr; } }
+@media (min-width: 1100px) { .dash { grid-template-columns: 1fr 1fr 1fr; } }
 
-  .now-bar { margin: 8px 16px 0; padding: 8px 12px; background: var(--card); border-radius: var(--radius); display: flex; align-items: center; gap: 10px; flex-shrink: 0; border: 1px solid var(--border); }
-  .now-thumb { width: 36px; height: 36px; border-radius: 6px; object-fit: cover; flex-shrink: 0; background: #1a1a1a; }
-  .now-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-  .now-dot.playing { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 1.5s infinite; }
-  .now-dot.paused { background: var(--text-dim); }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
-  .now-info { flex: 1; min-width: 0; }
-  .now-title { font-size: .85rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .now-artist { font-size: .75rem; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.panel { background: var(--card); border-radius: var(--radius); border: 1px solid var(--border); padding: 12px; box-shadow: var(--shadow); overflow: hidden; }
+.panel-wide { grid-column: 1 / -1; }
+.panel-title { font-size: .7rem; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+.panel-title .badge { font-size: .6rem; color: var(--dim); font-weight: 400; text-transform: none; }
+.ttip { cursor: help; border-bottom: 1px dotted var(--dim); }
+.info-bar { font-size: .6rem; color: var(--dim); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; margin-top: 6px; min-height: 22px; transition: all .15s; }
+.info-bar.bright { color: var(--accent); border-color: var(--accent); }
 
-  .carousel-wrap { flex: 1; position: relative; overflow: hidden; margin: 6px 12px 0; }
-  .carousel { display: flex; height: 100%; transition: transform .35s cubic-bezier(.22,.68,0,1); will-change: transform; }
-  .slide { min-width: 100%; height: 100%; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; }
-  .slide::-webkit-scrollbar { width: 3px; } .slide::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+/* Stats sub-grid */
+.stats-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+.stat-card { background: var(--bg); border-radius: 8px; padding: 10px 8px; text-align: center; border: 1px solid var(--border); }
+.stat-num { font-size: 1.4rem; font-weight: 900; color: var(--accent); line-height: 1.1; }
+.stat-label { font-size: .58rem; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; margin-top: 3px; }
 
-  .card { background: var(--card); border-radius: var(--radius); border: 1px solid var(--border); padding: 16px; flex: 1; display: flex; flex-direction: column; box-shadow: 0 0 20px rgba(0,255,65,.05); }
-  .card-title { font-size: .85rem; font-weight: 700; color: var(--accent); margin-bottom: 10px; flex-shrink: 0; letter-spacing: .02em; }
+.corr-grid { display: grid; gap: 1px; font-size: .55rem; }
+.corr-header, .corr-row { display: contents; }
+.corr-header span, .corr-row span { padding: 3px 4px; text-align: center; display: flex; align-items: center; justify-content: center; }
+.corr-header span { font-weight: 700; color: var(--dim); font-size: .5rem; }
+.corr-row .cl { justify-content: flex-end; padding-right: 6px; font-weight: 600; color: var(--dim); font-size: .5rem; white-space: nowrap; overflow: hidden; }
+.corr-row .cv { font-weight: 700; font-variant-numeric: tabular-nums; min-height: 22px; }
+.cv.rpos { color: var(--pos); } .cv.rneg { color: var(--neg); } .cv.rzero { color: var(--dim); }
 
-  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; flex: 1; align-content: center; }
-  .stat-card { background: var(--bg); border-radius: 10px; padding: 14px 10px; text-align: center; border: 1px solid var(--border); display: flex; flex-direction: column; justify-content: center; }
-  .stat-num { font-size: 1.8rem; font-weight: 900; color: var(--accent); line-height: 1.1; }
-  .stat-label { font-size: .65rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: .06em; margin-top: 4px; }
+.flow-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.flow-stat { background: var(--bg); border-radius: 6px; padding: 8px; border: 1px solid var(--border); }
+.flow-stat .val { font-size: 1.1rem; font-weight: 800; color: var(--accent); }
+.flow-stat .lbl { font-size: .55rem; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; }
+.flow-controls { display: flex; gap: 4px; margin-bottom: 6px; flex-wrap: wrap; }
+.flow-controls button { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 3px 8px; border-radius: 5px; cursor: pointer; font-size: .6rem; font-weight: 600; transition: all .1s; }
+.flow-controls button.on { background: var(--accent); color: #000; border-color: var(--accent); }
+.flow-tags { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 5px; }
+.flow-tags span { background: var(--bg); border: 1px solid var(--border); padding: 2px 6px; border-radius: 4px; font-size: .6rem; color: var(--dim); }
 
-  .rank-list { list-style: none; flex: 1; overflow-y: auto; }
-  .rank-item { display: flex; align-items: center; padding: 6px 0; border-bottom: 1px solid #181818; gap: 8px; }
-  .rank-item:last-child { border: none; }
-  .rank-thumb { width: 32px; height: 32px; border-radius: 6px; object-fit: cover; flex-shrink: 0; background: #1a1a1a; }
-  .rank-pos { font-size: .75rem; font-weight: 800; color: var(--accent); width: 20px; text-align: center; flex-shrink: 0; }
-  .rank-name { flex: 1; font-size: .82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .rank-stat { font-size: .7rem; color: var(--text-dim); flex-shrink: 0; font-weight: 600; }
-  .rank-bar { height: 3px; border-radius: 2px; background: var(--accent); opacity: .15; margin-top: 3px; }
-  .rank-bar-fill { height: 100%; border-radius: 2px; background: var(--accent); transition: width .4s; }
+.scatter-wrap { position: relative; }
+.scatter-wrap .chart-box { position: relative; width: 100%; overflow: hidden; border-radius: 6px; background: var(--bg); border: 1px solid var(--border); }
+.scatter-wrap canvas { display: block; width: 100%; height: 180px; }
+.scatter-controls { display: flex; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; align-items: center; }
+.scatter-controls label { font-size: .6rem; color: var(--dim); text-transform: uppercase; letter-spacing: .03em; }
+.scatter-controls select { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 2px 6px; border-radius: 4px; font-size: .65rem; }
 
-  .today-scroll { flex: 1; overflow-y: auto; }
-  .today-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #181818; }
-  .today-item:last-child { border: none; }
-  .today-thumb { width: 32px; height: 32px; border-radius: 6px; object-fit: cover; flex-shrink: 0; background: #1a1a1a; }
-  .today-plays { font-size: 1rem; font-weight: 800; color: var(--accent); width: 24px; text-align: center; flex-shrink: 0; }
-  .today-info { flex: 1; min-width: 0; }
-  .today-title { font-size: .82rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .today-meta { font-size: .68rem; color: var(--text-dim); }
-  .today-time { font-size: .62rem; color: var(--text-dim); flex-shrink: 0; }
+.rank-list { list-style: none; }
+.rank-item { display: flex; align-items: center; padding: 4px 0; border-bottom: 1px solid #181818; gap: 6px; }
+.rank-item:last-child { border: none; }
+.rank-pos { font-size: .65rem; font-weight: 800; color: var(--accent); width: 16px; text-align: center; flex-shrink: 0; }
+.rank-name { flex: 1; font-size: .75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rank-stat { font-size: .6rem; color: var(--dim); flex-shrink: 0; font-weight: 600; }
+.rank-bar { height: 2px; border-radius: 2px; background: var(--accent); opacity: .12; margin-top: 2px; }
+.rank-bar-fill { height: 100%; border-radius: 2px; background: var(--accent); transition: width .4s; }
 
-  .hm-scroll { overflow-x: auto; flex: 1; display: flex; flex-direction: column; }
-  .hm-scroll::-webkit-scrollbar { height: 2px; }
-  .hm-grid { display: flex; flex-direction: column; gap: 2px; flex: 1; }
-  .hm-row { display: flex; gap: 2px; flex: 1; }
-  .hm-cell { flex: 1; aspect-ratio: 1; border-radius: 3px; position: relative; cursor: default; min-height: 6px; }
-  .hm-cell.empty { background: #050505; border: 1px solid #111; }
-  .hm-cell.zero { background: #0d0d0d; border: 1px solid #1a1a1a; }
-  .hm-cell.l1 { background: #0a3310; } .hm-cell.l2 { background: #0d5c1a; } .hm-cell.l3 { background: #0f8c24; } .hm-cell.l4 { background: #00b82e; } .hm-cell.l5 { background: var(--accent); }
-  .hm-cell { cursor: default; }
-  .hm-headers { display: flex; margin-bottom: 2px; gap: 2px; }
-  .hm-headers span { flex: 1; text-align: center; font-size: .55rem; color: var(--text-dim); }
-  .hm-legend { display: flex; align-items: center; gap: 5px; justify-content: flex-end; font-size: .62rem; color: var(--text-dim); flex-shrink: 0; margin-top: 6px; }
-  .hm-lc { width: 12px; height: 12px; border-radius: 2px; }
-  .hm-labels { display: flex; font-size: .55rem; color: var(--text-dim); justify-content: space-between; }
+.bar-chart { display: flex; align-items: flex-end; gap: 1px; height: 80px; }
+.bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; position: relative; }
+.bar { width: 100%; border-radius: 2px 2px 0 0; transition: height .3s; min-height: 1px; background: linear-gradient(to top, #008a22, var(--accent)); }
+.bar.now { background: linear-gradient(to top, #aa2222, #ff3355); }
+.bar-label { font-size: .45rem; color: var(--dim); margin-top: 2px; }
 
-  .bar-chart { display: flex; align-items: flex-end; gap: 2px; flex: 1; padding-top: 6px; }
-  .bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; position: relative; }
-  .bar { width: 100%; border-radius: 3px 3px 0 0; transition: height .4s; min-height: 1px; background: linear-gradient(to top, #008a22, var(--accent)); }
-  .bar-overlay { width: 100%; position: absolute; bottom: 0; left: 0; border-radius: 3px 3px 0 0; background: rgba(255,40,40,.35); animation: pulse-red 1.2s ease-in-out infinite; pointer-events: none; }
-  @keyframes pulse-red { 0%,100%{opacity:.3;box-shadow:0 0 0 transparent} 50%{opacity:.7;box-shadow:0 0 12px rgba(255,40,40,.5)} }
-  .bar-label { font-size: .5rem; color: var(--text-dim); margin-top: 3px; text-align: center; }
-  .bar-label.now-label { color: #ff3333; font-weight: 700; font-size: .55rem; }
+.dh-wrap { font-size: .55rem; overflow-x: auto; }
+.dh-grid { display: grid; grid-template-columns: 22px repeat(24, 1fr); gap: 1px; align-items: center; }
+.dh-header { text-align: center; font-size: .4rem; color: var(--dim); padding: 1px 0; }
+.dh-label { text-align: center; font-size: .45rem; color: var(--dim); font-weight: 600; }
+.dh-cell { aspect-ratio: 1; border-radius: 2px; min-height: 4px; cursor: pointer; }
+.dh-cell:hover { outline: 1px solid var(--accent); }
+.dh-legend { display: flex; align-items: center; gap: 3px; margin-top: 4px; font-size: .5rem; color: var(--dim); }
+.dh-lc { width: 10px; height: 10px; border-radius: 2px; }
 
-  .nav-bar { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px max(12px, env(safe-area-inset-bottom)); flex-shrink: 0; }
-  .nav-btn { background: var(--card); border: 1px solid var(--border); color: var(--accent); width: 38px; height: 38px; border-radius: 50%; cursor: pointer; font-size: 1.1rem; transition: all .15s; display: flex; align-items: center; justify-content: center; }
-  .nav-btn:active { background: #1a1a1a; }
-  .nav-dots { display: flex; gap: 5px; }
-  .nav-dot { width: 6px; height: 6px; border-radius: 50%; background: #222; border: none; cursor: pointer; transition: all .2s; padding: 0; }
-  .nav-dot.active { background: var(--accent); box-shadow: 0 0 6px var(--accent); width: 18px; border-radius: 3px; }
+.today-scroll { max-height: 200px; overflow-y: auto; }
+.today-item { display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid #181818; }
+.today-item:last-child { border: none; }
+.today-plays { font-size: .85rem; font-weight: 800; color: var(--accent); width: 20px; text-align: center; flex-shrink: 0; }
+.today-info { flex: 1; min-width: 0; }
+.today-title { font-size: .75rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.today-meta { font-size: .6rem; color: var(--dim); }
+.today-time { font-size: .55rem; color: var(--dim); flex-shrink: 0; }
 
-  .empty-state { color: var(--text-dim); font-size: .8rem; text-align: center; padding: 20px 0; flex: 1; display: flex; align-items: center; justify-content: center; }
+.empty { color: var(--dim); font-size: .75rem; text-align: center; padding: 16px 0; }
 
-  @media (max-width:380px) { .stat-num { font-size:1.4rem } .slide { padding:10px } .card { padding:12px } }
+.primary-btn { background: var(--accent); border: none; color: #000; padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: .65rem; font-weight: 700; transition: all .15s; }
+.primary-btn:active { transform: scale(.96); }
+
+@media (max-width: 400px) { .stats-grid { grid-template-columns: 1fr 1fr; } }
 </style>
 </head>
 <body>
 <div id="app">
   <div class="top-bar">
-    <div class="logo">yt wrapped</div>
-    <div class="chip-group">
-      <button class="chip" :class="{ active: period === 'today' }" @click="setPeriod('today')">today</button>
-      <button class="chip" :class="{ active: period === 'week' }" @click="setPeriod('week')">week</button>
-      <button class="chip" :class="{ active: period === 'month' }" @click="setPeriod('month')">month</button>
+    <div class="now-mini">
+      <div :key="'dot-'+beatKey" class="now-dot" :class="{ on: n.playing, off: !n.playing, beat: n.playing && n.bpm }" :style="dotStyle"></div>
+      <div class="now-info" v-if="n.playing"><strong>{{ n.title }}</strong> <span class="art">{{ n.artist }}</span></div>
+      <div class="now-info" v-else style="color:var(--dim)">nothing playing</div>
+    </div>
+    <div class="period-group">
+      <button :class="{ on: p === 'today' }" @click="setP('today')">today</button>
+      <button :class="{ on: p === 'week' }" @click="setP('week')">week</button>
+      <button :class="{ on: p === 'month' }" @click="setP('month')">month</button>
     </div>
   </div>
 
-  <div class="now-bar">
-    <img class="now-thumb" :src="ytThumb(now.videoId)" @error="onImgErr" v-if="now.playing">
-    <div class="now-dot" :class="now.playing ? 'playing' : 'paused'"></div>
-    <div class="now-info">
-      <div class="now-title" v-if="now.playing">{{ now.title }}</div>
-      <div class="now-title" v-else style="color:var(--text-dim)">nothing playing</div>
-      <div class="now-artist" v-if="now.playing">{{ now.artist }}</div>
-      <div class="now-artist" v-else>play a song to see it here</div>
-    </div>
-  </div>
+  <div class="dash">
 
-  <div class="carousel-wrap">
-    <div class="carousel" :style="{ transform: `translateX(-${slide * 100}%)` }">
-      <!-- 0: OVERVIEW -->
-      <div class="slide"><div class="card">
-        <div class="card-title">overview</div>
-        <div class="stat-grid">
-          <div class="stat-card"><div class="stat-num">{{ stats.totalSongs }}</div><div class="stat-label">songs</div></div>
-          <div class="stat-card"><div class="stat-num">{{ stats.totalPlays }}</div><div class="stat-label">plays</div></div>
-          <div class="stat-card"><div class="stat-num">{{ stats.totalMinutes }}</div><div class="stat-label">minutes</div></div>
-          <div class="stat-card"><div class="stat-num">{{ stats.likedSongs }}</div><div class="stat-label">liked</div></div>
-          <div class="stat-card"><div class="stat-num">{{ stats.daysActive }}</div><div class="stat-label">days</div></div>
-          <div class="stat-card"><div class="stat-num">{{ stats.songsWithBpm }}</div><div class="stat-label">bpm</div></div>
+    <!-- STATS -->
+    <div class="panel">
+      <div class="panel-title">overview</div>
+      <div class="stats-grid">
+        <div class="stat-card" title="Unique songs you've listened to in this period"><div class="stat-num">{{ s.totalSongs }}</div><div class="stat-label">songs</div></div>
+        <div class="stat-card" title="Total plays (including repeats) in this period"><div class="stat-num">{{ s.totalPlays }}</div><div class="stat-label">plays</div></div>
+        <div class="stat-card" title="Total minutes of listening in this period"><div class="stat-num">{{ s.totalMinutes }}</div><div class="stat-label">min</div></div>
+        <div class="stat-card" title="Songs you've liked during this period"><div class="stat-num">{{ s.likedSongs }}</div><div class="stat-label">liked</div></div>
+        <div class="stat-card" title="Unique days you played music in this period"><div class="stat-num">{{ s.daysActive }}</div><div class="stat-label">days</div></div>
+        <div class="stat-card" title="Listening sessions detected in this period (~60min timeout)"><div class="stat-num">{{ s.sessionCount }}</div><div class="stat-label">sessions</div></div>
+      </div>
+    </div>
+
+    <!-- FLOW STATE -->
+    <div class="panel">
+      <div class="panel-title">flow state <span class="badge">peak keystroke profile</span></div>
+      <div class="flow-controls">
+        <button v-for="cat in ['coding','terminal','browser']" :key="cat"
+          :class="{ on: flowApp === cat }" @click="loadFlow(cat)">{{ cat }}</button>
+      </div>
+      <div v-if="flow">
+        <div class="flow-grid">
+          <div class="flow-stat" title="Average BPM during peak keystroke periods for {{ flowApp }} — higher BPM correlates with high-intensity flow"><div class="val">{{ flow.bpm.avg }}</div><div class="lbl">avg bpm</div></div>
+          <div class="flow-stat" title="BPM range (min-max) during peak keystroke periods — narrower range = more consistent tempo preference"><div class="val">{{ flow.bpm.min }}-{{ flow.bpm.max }}</div><div class="lbl">bpm range</div></div>
+          <div class="flow-stat" title="Energy (0-100%) from Last.fm — how intense/aggressive the music sounds in peak flow moments"><div class="val">{{ (flow.energy.avg * 100).toFixed(0) }}%</div><div class="lbl">energy</div></div>
+          <div class="flow-stat" title="Valence (0-100%) from Last.fm — how positive/happy the music sounds in peak flow moments"><div class="val">{{ (flow.valence.avg * 100).toFixed(0) }}%</div><div class="lbl">valence</div></div>
         </div>
-      </div></div>
+        <div class="flow-tags" v-if="flow.genres.length">
+          <span v-for="g in flow.genres" :key="g">{{ g }}</span>
+        </div>
+        <div style="margin-top:6px;font-size:.6rem;color:var(--dim)">{{ flow.sampleSize }} data points · top {{ flow.flowDataPoints }} flow samples</div>
+      </div>
+      <div v-else class="empty">not enough data (need ≥5 context-rich listens)</div>
+    </div>
 
-      <!-- 1: TOP SONGS -->
-      <div class="slide"><div class="card">
-        <div class="card-title">top songs</div>
-        <ol class="rank-list">
-          <li class="rank-item" v-for="(s, i) in topSongs" :key="s.videoId || i">
-            <img class="rank-thumb" :src="ytThumb(s.videoId)" @error="onImgErr">
-            <span class="rank-pos">{{ i + 1 }}</span>
-            <span class="rank-name">{{ s.title }}</span>
-            <span class="rank-stat">{{ s.plays }}x</span>
-          </li>
-          <li v-if="topSongs.length === 0" class="empty-state">no data</li>
-        </ol>
-      </div></div>
+    <!-- TOP SONGS -->
+    <div class="panel">
+      <div class="panel-title">top songs</div>
+      <ol class="rank-list">
+        <li class="rank-item" v-for="(t, i) in topS" :key="t.videoId || i" :title="'#' + (i+1) + ' — ' + t.plays + ' plays in this period'">
+          <span class="rank-pos">{{ i + 1 }}</span>
+          <span class="rank-name">{{ t.title }}</span>
+          <span class="rank-stat">{{ t.plays }}x</span>
+        </li>
+        <li v-if="!topS.length" class="empty">no data</li>
+      </ol>
+    </div>
 
-      <!-- 2: TOP ARTISTS -->
-      <div class="slide"><div class="card">
-        <div class="card-title">top artists</div>
-        <ol class="rank-list">
-          <li class="rank-item" v-for="(a, i) in topArtists" :key="a.artist">
-            <span class="rank-pos">{{ i + 1 }}</span>
-            <span class="rank-name">{{ a.artist }}</span>
-            <span class="rank-stat">{{ a.plays }}</span>
-          </li>
-          <li v-if="topArtists.length === 0" class="empty-state">no data</li>
-        </ol>
-      </div></div>
+    <!-- TOP GENRES -->
+    <div class="panel">
+      <div class="panel-title">top genres</div>
+      <ol class="rank-list">
+        <li class="rank-item" v-for="(g, i) in topG" :key="g.genre" :title="'Genre: ' + g.genre + ' — ' + g.plays + ' plays this period'">
+          <span class="rank-pos">{{ i + 1 }}</span>
+          <span class="rank-name">{{ g.genre }}</span>
+          <span class="rank-stat">{{ g.plays }}</span>
+          <div class="rank-bar" style="flex:1;max-width:50px"><div class="rank-bar-fill" :style="{ width: (g.plays / maxGenre * 100) + '%' }"></div></div>
+        </li>
+        <li v-if="!topG.length" class="empty">no data</li>
+      </ol>
+    </div>
 
-      <!-- 3: TOP GENRES -->
-      <div class="slide"><div class="card">
-        <div class="card-title">top genres</div>
-        <ol class="rank-list">
-          <li class="rank-item" v-for="(g, i) in topGenres" :key="g.genre">
-            <span class="rank-pos">{{ i + 1 }}</span>
-            <span class="rank-name">{{ g.genre }}</span>
-            <span class="rank-stat">{{ g.plays }}</span>
-            <div class="rank-bar" style="flex:1;max-width:60px"><div class="rank-bar-fill" :style="{ width: (g.plays / maxGenre * 100) + '%' }"></div></div>
-          </li>
-          <li v-if="topGenres.length === 0" class="empty-state">no data</li>
-        </ol>
-      </div></div>
-
-      <!-- 4: TODAY LIVE -->
-      <div class="slide"><div class="card">
-        <div class="card-title">today · live</div>
-        <div v-if="todaySongs.length === 0" class="empty-state">no songs yet today</div>
-        <div class="today-scroll" v-else>
-          <div class="today-item" v-for="s in todaySongs" :key="s.videoId">
-            <img class="today-thumb" :src="ytThumb(s.videoId)" @error="onImgErr">
-            <span class="today-plays">{{ s.plays }}</span>
-            <div class="today-info">
-              <div class="today-title">{{ s.title }}</div>
-              <div class="today-meta">{{ s.artist }}{{ s.genre ? ' · ' + s.genre : '' }}{{ s.bpm ? ' · ' + s.bpm + 'bpm' : '' }}</div>
-            </div>
-            <span class="today-time">{{ s.lastListened }}</span>
+    <!-- CORRELATION MATRIX -->
+    <div class="panel panel-wide">
+        <div class="panel-title">correlation matrix <span class="badge">pearson r · musical × environmental</span></div>
+      <div v-if="corr" style="overflow-x:auto">
+        <div class="corr-grid" :style="{ gridTemplateColumns: 'repeat(' + (corr.variables.length + 1) + ', minmax(36px,auto))' }">
+          <div class="corr-header"><span></span>
+            <span v-for="v in corr.variables" :key="v.key" :title="varDesc[v.key]">{{ v.icon }}</span>
+          </div>
+          <div class="corr-row" v-for="v1 in corr.variables" :key="v1.key">
+            <span class="cl" :title="varDesc[v1.key]">{{ v1.icon }}</span>
+            <span v-for="v2 in corr.variables" :key="v2.key"
+              class="cv" :class="corrClass(corr.matrix[v1.key][v2.key].r)"
+              :style="{ background: corrBg(corr.matrix[v1.key][v2.key].r) }"
+              @mouseenter="setCorrHover(v1.key, v2.key, corr.matrix[v1.key][v2.key])"
+              @mouseleave="corrHover=''"
+              :title="varDesc[v1.key] + ' vs ' + varDesc[v2.key] + '\nr=' + corr.matrix[v1.key][v2.key].r + '  n=' + corr.matrix[v1.key][v2.key].n">
+              {{ fmtR(corr.matrix[v1.key][v2.key].r) }}
+            </span>
           </div>
         </div>
-      </div></div>
-
-      <!-- 5: HEATMAP -->
-      <div class="slide"><div class="card">
-        <div class="card-title">heatmap <span v-if="period === 'today'" style="font-weight:400;color:var(--text-dim);font-size:.75rem">· hourly</span></div>
-        <div class="hm-scroll" v-if="hmRows.length > 0">
-          <template v-if="period === 'today'">
-            <div class="hm-grid">
-              <div v-for="(row, ri) in hmRows" :key="ri" style="display:flex;align-items:center;gap:4px">
-                <span style="font-size:.55rem;color:var(--text-dim);width:28px;text-align:right;flex-shrink:0">{{ ['00-05','06-11','12-17','18-23'][ri] }}</span>
-                <div class="hm-row" style="flex:1">
-                  <div v-for="cell in row" :key="cell.label" class="hm-cell" :class="hmClass(cell.count, hmMax)" :title="cell.label + ': ' + cell.count + ' plays'"></div>
-                </div>
-              </div>
-            </div>
-          </template>
-          <template v-else>
-            <div class="hm-headers"><span v-for="d in ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']" :key="d">{{ d }}</span></div>
-            <div class="hm-grid">
-              <div v-for="(week, wi) in hmRows" :key="wi" class="hm-row">
-                <div v-for="day in week" :key="day.date || wi + '-' + day.day" class="hm-cell" :class="hmClass(day.count, hmMax, day.empty)" :title="day.empty ? '' : day.date + ': ' + day.count + ' plays'"></div>
-              </div>
-            </div>
-          </template>
-        </div>
-        <div v-else class="empty-state">no data</div>
-        <div class="hm-legend">
-          <span>less</span><div class="hm-lc" style="background:#0d0d0d;border:1px solid #1a1a1a"></div>
-          <div class="hm-lc" style="background:#0a3310"></div><div class="hm-lc" style="background:#0d5c1a"></div>
-          <div class="hm-lc" style="background:#0f8c24"></div><div class="hm-lc" style="background:var(--accent)"></div><span>more</span>
-        </div>
-      </div></div>
-
-      <!-- 6: HOURLY -->
-      <div class="slide"><div class="card">
-        <div class="card-title">hourly</div>
-        <div class="bar-chart">
-          <div class="bar-wrap" v-for="h in hourly" :key="h.hour">
-            <div class="bar" :style="{ height: h.pct + '%' }"></div>
-            <div v-if="h.hour === currentHour" class="bar-overlay" :style="{ height: h.pct + '%' }"></div>
-            <div class="bar-label" :class="{ 'now-label': h.hour === currentHour }">{{ h.label }}</div>
-          </div>
-        </div>
-      </div></div>
-
-      <!-- 7: OBSESSIONS -->
-      <div class="slide"><div class="card">
-        <div class="card-title">obsessions</div>
-        <ol class="rank-list">
-          <li class="rank-item" v-for="(s, i) in obsessions" :key="s.title + s.artist">
-            <span class="rank-pos">{{ i + 1 }}</span>
-            <span class="rank-name">{{ s.title }} · {{ s.artist }}</span>
-            <span class="rank-stat">{{ s.plays }}x</span>
-          </li>
-          <li v-if="obsessions.length === 0" class="empty-state">none yet</li>
-        </ol>
-      </div></div>
-
-      <!-- 8: REVIVAL -->
-      <div class="slide"><div class="card">
-        <div class="card-title">revival</div>
-        <ol class="rank-list">
-          <li class="rank-item" v-for="(s, i) in revival" :key="s.title + s.artist">
-            <span class="rank-pos">{{ i + 1 }}</span>
-            <span class="rank-name">{{ s.title }} · {{ s.artist }}</span>
-            <span class="rank-stat">{{ s.playCount }}x</span>
-          </li>
-          <li v-if="revival.length === 0" class="empty-state">nothing to revive</li>
-        </ol>
-      </div></div>
+        <div class="info-bar" :class="{ bright: corrHover }">{{ corrHover || 'hover a cell for interpretation' }}</div>
+        <div style="margin-top:4px;font-size:.55rem;color:var(--dim);text-align:right">n = {{ corr.sampleSize }} listens with context</div>
+      </div>
+      <div v-else class="empty">not enough data (need ≥5 context-rich listens)</div>
     </div>
-  </div>
 
-  <div class="nav-bar">
-    <button class="nav-btn" @click="slide = slide > 0 ? slide - 1 : slide">‹</button>
-    <div class="nav-dots"><button class="nav-dot" v-for="i in total" :key="i" :class="{ active: slide === i - 1 }" @click="slide = i - 1"></button></div>
-    <button class="nav-btn" @click="slide = slide < total - 1 ? slide + 1 : slide">›</button>
+    <!-- SCATTER PLOT -->
+    <div class="panel panel-wide">
+      <div class="panel-title">scatter plot <span class="badge">regression analysis</span></div>
+      <div class="scatter-controls">
+        <label>x</label>
+        <select v-model="scatterX" @change="loadScatter">
+          <option v-for="v in scatterOpts" :key="v" :value="v">{{ v }}</option>
+        </select>
+        <label>y</label>
+        <select v-model="scatterY" @change="loadScatter">
+          <option v-for="v in scatterOpts" :key="v" :value="v">{{ v }}</option>
+        </select>
+      </div>
+      <div class="scatter-wrap">
+        <div class="chart-box" ref="scatterBox">
+          <canvas ref="scatterCanvas" height="180"></canvas>
+        </div>
+      </div>
+      <div v-if="scatter" style="margin-top:4px;font-size:.55rem;color:var(--dim);display:flex;gap:12px;flex-wrap:wrap">
+        <span :title="'Sample size — number of listens with both ' + scatterX.value + ' and ' + scatterY.value + ' data'">n = {{ scatter.n }}</span>
+        <span :title="'Pearson r: strength and direction of linear relationship (' + interpR(scatter.regression.r) + ')'">r = {{ scatter.regression.r }}</span>
+        <span :title="'Coefficient of determination — proportion of variance explained by the model (' + (scatter.regression.rSquared * 100).toFixed(0) + '% of ' + scatterY.value + ' is predictable from ' + scatterX.value + ')'">r² = {{ scatter.regression.rSquared }}</span>
+        <span :title="'Regression slope — each unit increase in ' + scatterX.value + ' changes ' + scatterY.value + ' by ' + scatter.regression.slope.toFixed(3)">slope = {{ scatter.regression.slope }}</span>
+        <span :title="'y-intercept — ' + scatterY.value + ' value when ' + scatterX.value + ' is zero'">intercept = {{ scatter.regression.intercept }}</span>
+      </div>
+    </div>
+
+    <!-- HOURLY (full-width) -->
+    <div class="panel panel-wide">
+      <div class="panel-title">hourly distribution <span class="badge">songs by hour</span></div>
+      <div class="bar-chart">
+        <div class="bar-wrap" v-for="h in hours" :key="h.hour">
+          <div class="bar" :class="{ now: h.hour === curHour }" :style="{ height: h.pct + '%' }"></div>
+          <div class="bar-label" :style="{ color: h.hour === curHour ? '#ff3355' : '' }">{{ h.label }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- WEEK RHYTHM (day × hour heatmap) -->
+    <div class="panel">
+      <div class="panel-title">week rhythm
+        <span class="badge">day × hour — when you listen</span>
+      </div>
+      <div v-if="dhMatrix.length > 0" class="dh-wrap">
+        <div class="dh-grid">
+          <div class="dh-header"></div>
+          <div class="dh-header" v-for="h in dhLabels" :key="h" :title="'Hour ' + h">{{ h }}</div>
+          <template v-for="(row, di) in dhMatrix" :key="di">
+            <div class="dh-label"
+              :title="['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][di]">{{ ['S','M','T','W','T','F','S'][di] }}</div>
+            <div v-for="(cell, hi) in row" :key="di + '-' + hi"
+              class="dh-cell"
+              :style="{ background: dhBg(cell) }"
+              :title="dhTitle(di, hi, cell)"
+              @mouseenter="dhHoverText = dhTitle(di, hi, cell)"
+              @mouseleave="dhHoverText = ''">
+            </div>
+          </template>
+        </div>
+        <div class="info-bar" :class="{ bright: dhHoverText }">{{ dhHoverText || 'hover for details' }}</div>
+        <div class="dh-legend">
+          <span>0</span>
+          <div class="dh-lc" style="background:#0f0f0f;border:1px solid #1a1a1a"></div>
+          <div class="dh-lc" style="background:#0a3310"></div>
+          <div class="dh-lc" style="background:#0d5c1a"></div>
+          <div class="dh-lc" style="background:#0f8c24"></div>
+          <div class="dh-lc" style="background:var(--accent)"></div>
+          <span>{{ dhMax }}</span>
+        </div>
+      </div>
+      <div v-else class="empty">not enough data</div>
+    </div>
+
+    <!-- TODAY -->
+    <div class="panel">
+      <div class="panel-title">today · live</div>
+      <div v-if="today.length === 0" class="empty">no songs yet today</div>
+      <div class="today-scroll" v-else>
+        <div class="today-item" v-for="s in today" :key="s.videoId">
+          <span class="today-plays">{{ s.plays }}</span>
+          <div class="today-info">
+            <div class="today-title">{{ s.title }}</div>
+            <div class="today-meta">{{ s.artist }}{{ s.genre ? ' · ' + s.genre : '' }}{{ s.bpm ? ' · ' + s.bpm + 'bpm' : '' }}</div>
+          </div>
+          <span class="today-time">{{ s.lastListened }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- OBSESSIONS -->
+    <div class="panel">
+      <div class="panel-title">obsessions</div>
+      <ol class="rank-list">
+        <li class="rank-item" v-for="(o, i) in obs" :key="o.title + o.artist" :title="o.genre ? 'Genre: ' + o.genre : ''">
+          <span class="rank-pos">{{ i + 1 }}</span>
+          <span class="rank-name">{{ o.title }} · {{ o.artist }}</span>
+          <span class="rank-stat">{{ o.plays }}x</span>
+        </li>
+        <li v-if="!obs.length" class="empty">none</li>
+      </ol>
+    </div>
+
+    <!-- REVIVAL -->
+    <div class="panel">
+      <div class="panel-title">revival <span class="badge">30d dormant</span></div>
+      <ol class="rank-list">
+        <li class="rank-item" v-for="(r, i) in rev" :key="r.title + r.artist" :title="'Last heard ' + r.lastListened + ' — ' + r.playCount + ' total plays, time for a revival?'">
+          <span class="rank-pos">{{ i + 1 }}</span>
+          <span class="rank-name">{{ r.title }} · {{ r.artist }}</span>
+          <span class="rank-stat">{{ r.playCount }}x</span>
+        </li>
+        <li v-if="!rev.length" class="empty">nothing dormant</li>
+      </ol>
+    </div>
+
   </div>
 </div>
 
 <script>
-const { createApp, ref, computed, onMounted, onUnmounted } = Vue;
+const { createApp, ref, computed, onMounted, onUnmounted, nextTick, watch } = Vue;
 
 createApp({
   setup() {
-    const slide = ref(0); const total = 9; const period = ref('week');
-    const stats = ref({ totalSongs:0,totalPlays:0,totalMinutes:0,likedSongs:0,daysActive:0,songsWithBpm:0 });
-    const topSongs = ref([]); const topArtists = ref([]); const topGenres = ref([]);
-    const hourly = ref([]); const hmRows = ref([]); const hmMax = ref(1);
-    const currentHour = ref(new Date().getHours());
-    const todaySongs = ref([]); const obsessions = ref([]); const revival = ref([]);
-    const now = ref({ playing: false, videoId: null });
+    const p = ref('week');
+    const s = ref({ totalSongs:0, totalPlays:0, totalMinutes:0, likedSongs:0, daysActive:0, sessionCount:0 });
+    const topS = ref([]); const topG = ref([]);
+    const hours = ref([]); const dhMatrix = ref([]); const dhMax = ref(1); const dhHoverText = ref('');
+    const dhLabels = computed(() => {
+      const lbl = [];
+      for (let h = 0; h < 24; h++) lbl.push(String(h).padStart(2,'0'));
+      return lbl;
+    });
+    const curHour = ref(new Date().getHours());
+    const beatKey = ref(0);
+    const dotStyle = computed(() => {
+      if (!n.value.bpm || !n.value.playing) return {};
+      const dur = 60 / n.value.bpm;
+      const beatPhase = ((n.value.elapsed || 0) * n.value.bpm / 60) % 1;
+      const delay = -(beatPhase * dur);
+      return { '--bpm-dur': dur + 's', '--bpm-delay': delay + 's', 'animationDelay': delay + 's' };
+    });
+    const today = ref([]); const obs = ref([]); const rev = ref([]);
+    const n = ref({ playing: false });
+    const corr = ref(null); const corrHover = ref('');
+    const flow = ref(null); const flowApp = ref('coding');
+    const scatter = ref(null); const scatterX = ref('bpm'); const scatterY = ref('cpuLoad');
+    const varDesc = {
+      bpm: 'Beats per minute — tempo of the song',
+      energy: 'Energy (0-1) — how intense/aggressive the music sounds',
+      valence: 'Valence (0-1) — how positive/happy the music sounds',
+      danceability: 'Danceability (0-1) — how suitable the song is for dancing',
+      keystrokeRate: 'Keystroke rate (interrupts/sec) — how actively you are typing',
+      cpuLoad: 'CPU load average — how hard the processor is working',
+      memoryUsage: 'Memory usage (GB) — how much RAM is in use',
+      hour: 'Hour of day (0-23) — time of the listen',
+    };
+    const scatterCanvas = ref(null); const scatterBox = ref(null);
+    const scatterOpts = ['bpm','energy','valence','danceability','keystrokeRate','cpuLoad','memoryUsage','hour'];
 
-    const maxGenre = computed(() => Math.max(1, ...topGenres.value.map(g => g.plays)));
-
-    function ytThumb(vid) { return vid ? `https://img.youtube.com/vi/${vid}/default.jpg` : ''; }
-    function onImgErr(e) { e.target.style.display = 'none'; }
-
-    function hmClass(count, max, empty) {
-      if (empty) return 'empty';
-      if (!count || count === 0) return 'zero';
-      const i = Math.min(4, Math.ceil(count / Math.max(1, max) * 5) - 1);
-      return 'l' + Math.max(0, i);
-    }
-
+    const maxGenre = computed(() => Math.max(1, ...topG.value.map(g => g.plays)));
     const BASE = window.location.protocol === 'file:' ? 'http://localhost:3456' : '';
+
     async function api(path) { try { const r = await fetch(BASE + path); return r.ok ? r.json() : null; } catch { return null; } }
 
     function dayToCol(d) { return d === 0 ? 6 : d - 1; }
 
-    function buildHeatmap(data, todayHourly) {
-      if (period.value === 'today') {
-        const max = Math.max(1, ...(todayHourly || []).map(h => h.count));
-        hmMax.value = max;
-        const full = [];
-        for (let i = 0; i < 24; i++) {
-          const e = (todayHourly || []).find(h => h.hour === i);
-          full.push({ label: String(i).padStart(2,'0') + ':00', count: e ? e.count : 0 });
+    function buildDayHourMatrix(data) {
+      if (!data?.length) { dhMatrix.value = []; return; }
+      const matrix = [];
+      let max = 0;
+      for (let d = 0; d < 7; d++) {
+        const row = [];
+        for (let h = 0; h < 24; h++) {
+          const cell = data.find(x => x.dow === d && x.hour === h);
+          const count = cell ? cell.count : 0;
+          if (count > max) max = count;
+          row.push(count);
         }
-        hmRows.value = [full.slice(0,6), full.slice(6,12), full.slice(12,18), full.slice(18,24)];
-        return;
+        matrix.push(row);
       }
-
-      if (!data?.length) { hmRows.value = []; return; }
-      const today = new Date();
-      const daysBack = period.value === 'week' ? 7 : 30;
-      let max = 1;
-      const weeks = []; let week = [];
-
-      const startDate = new Date(today); startDate.setDate(startDate.getDate() - daysBack + 1);
-      const leadEmpty = dayToCol(startDate.getDay());
-      for (let i = 0; i < leadEmpty; i++) week.push({ count: 0, empty: true });
-
-      for (let i = 0; i < daysBack; i++) {
-        const d = new Date(today); d.setDate(d.getDate() - (daysBack - 1 - i));
-        const key = d.toISOString().split('T')[0];
-        const e = data.find(x => x.date === key);
-        const c = e ? e.count : 0;
-        if (c > max) max = c;
-        week.push({ date: key, count: c, day: d.getDay() });
-        if (d.getDay() === 6) { weeks.push(week); week = []; }
-      }
-      if (week.length > 0) {
-        const lastReal = week.filter(d => !d.empty).pop();
-        const lastCol = lastReal ? dayToCol(lastReal.day) : 6;
-        for (let i = lastCol + 1; i < 7; i++) week.push({ count: 0, empty: true });
-        weeks.push(week);
-      }
-      hmRows.value = weeks;
-      hmMax.value = max;
+      dhMatrix.value = matrix;
+      dhMax.value = max || 1;
+    }
+    function dhBg(count) {
+      if (count === 0) return '#0f0f0f';
+      const intensity = Math.min(1, count / dhMax.value);
+      const g = Math.round(12 + intensity * 180);
+      return `rgb(0,${g},0)`;
+    }
+    function dhTitle(dow, hour, count) {
+      const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+      if (count === 0) return days[dow] + ' at ' + String(hour).padStart(2,'0') + ':00 — no plays';
+      return days[dow] + ' at ' + String(hour).padStart(2,'0') + ':00 — ' + count + ' plays';
     }
 
     function processHourly(data) {
-      if (!data?.length) { hourly.value = []; return; }
+      if (!data?.length) { hours.value = []; return; }
       const maxC = Math.max(...data.map(h => h.count), 1);
       const filled = [];
       for (let i = 0; i < 24; i++) {
         const e = data.find(h => h.hour === i);
         filled.push({ hour: i, count: e ? e.count : 0, pct: ((e ? e.count : 0) / maxC) * 100, label: String(i).padStart(2,'0') });
       }
-      hourly.value = filled;
+      hours.value = filled;
+    }
+
+    function interpR(r) {
+      const a = Math.abs(r);
+      if (a < 0.1) return 'no linear correlation';
+      if (a < 0.3) return 'weak ' + (r > 0 ? 'positive' : 'negative');
+      if (a < 0.5) return 'moderate ' + (r > 0 ? 'positive' : 'negative');
+      if (a < 0.7) return 'strong ' + (r > 0 ? 'positive' : 'negative');
+      return 'very strong ' + (r > 0 ? 'positive' : 'negative');
+    }
+    function setCorrHover(k1, k2, c) {
+      const lbl1 = varDesc[k1], lbl2 = varDesc[k2];
+      const dir = c.r > 0 ? 'sube' : 'baja';
+      const ant = c.r > 0 ? 'sube también' : 'baja';
+      const interp = interpR(c.r);
+      corrHover.value = `↗ ${k1.toUpperCase()} vs ${k2.toUpperCase()}: r=${c.r.toFixed(3)} (${interp}, n=${c.n}) → Cuando ${lbl1.split(' — ')[0]} ${dir}, ${lbl2.split(' — ')[0]} ${ant}`;
+    }
+    function hmCls(count, max, empty) {
+      if (empty) return 'empty';
+      if (!count || count === 0) return 'zero';
+      const i = Math.min(4, Math.ceil(count / Math.max(1, max) * 5) - 1);
+      return 'l' + Math.max(0, i);
+    }
+
+    function corrClass(r) {
+      if (r > 0.3) return 'rpos'; if (r < -0.3) return 'rneg'; return 'rzero';
+    }
+
+    function corrBg(r) {
+      if (Math.abs(r) < 0.05) return '#151515';
+      const intensity = Math.min(1, Math.abs(r));
+      if (r > 0) {
+        const g = Math.round(60 + intensity * 140);
+        return `rgba(0,${g},0,${0.15 + intensity * 0.5})`;
+      }
+      const red = Math.round(60 + intensity * 180);
+      return `rgba(${red},0,0,${0.15 + intensity * 0.5})`;
+    }
+
+    function fmtR(r) {
+      if (Math.abs(r) < 0.01) return '0';
+      return r.toFixed(2);
+    }
+
+    function drawScatter() {
+      const cvs = scatterCanvas.value;
+      if (!cvs || !scatter.value) return;
+      const dpr = window.devicePixelRatio || 1;
+      const box = cvs.parentElement;
+      const w = box.clientWidth || 600;
+      const h = 180;
+      cvs.width = w * dpr;
+      cvs.height = h * dpr;
+      const ctx = cvs.getContext('2d');
+      ctx.scale(dpr, dpr);
+      const pad = { top: 14, right: 12, bottom: 26, left: 42 };
+      const pw = w - pad.left - pad.right;
+      const ph = h - pad.top - pad.bottom;
+
+      const pts = scatter.value.points;
+      if (!pts.length) {
+        ctx.fillStyle = '#555'; ctx.font = '13px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('no data — keep listening to build context', w/2, h/2);
+        return;
+      }
+
+      const xMin = Math.min(...pts.map(p => p.x));
+      const xMax = Math.max(...pts.map(p => p.x));
+      const yMin = Math.min(...pts.map(p => p.y));
+      const yMax = Math.max(...pts.map(p => p.y));
+      const xPad = (xMax - xMin) * 0.08 || 1;
+      const yPad = (yMax - yMin) * 0.08 || 1;
+      const x0 = xMin - xPad, x1 = xMax + xPad;
+      const y0 = yMin - yPad, y1 = yMax + yPad;
+      const xRng = x1 - x0 || 1;
+      const yRng = y1 - y0 || 1;
+      const toX = v => pad.left + (v - x0) / xRng * pw;
+      const toY = v => pad.top + ph - (v - y0) / yRng * ph;
+
+      ctx.clearRect(0, 0, w, h);
+
+      // Grid lines + Y-axis tick labels
+      ctx.fillStyle = '#444'; ctx.font = '9px monospace'; ctx.textAlign = 'right';
+      ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 0.5;
+      for (let i = 0; i <= 4; i++) {
+        const frac = i / 4;
+        const yVal = y0 + frac * yRng;
+        const yPos = pad.top + ph - frac * ph;
+        ctx.beginPath(); ctx.moveTo(pad.left, yPos); ctx.lineTo(pad.left + pw, yPos); ctx.stroke();
+        ctx.fillText(yVal.toFixed(1), pad.left - 4, yPos + 3);
+
+        const xVal = x0 + frac * xRng;
+        const xPos = pad.left + frac * pw;
+        ctx.beginPath(); ctx.moveTo(xPos, pad.top); ctx.lineTo(xPos, pad.top + ph); ctx.stroke();
+        ctx.textAlign = 'center';
+        ctx.fillText(xVal.toFixed(xVal > 100 ? 0 : 1), xPos, h - 6);
+        ctx.textAlign = 'right';
+      }
+
+      // Data points
+      ctx.fillStyle = 'rgba(0,255,65,0.6)';
+      for (const p of pts) {
+        ctx.beginPath(); ctx.arc(toX(p.x), toY(p.y), 3, 0, Math.PI * 2); ctx.fill();
+      }
+
+      // Regression line
+      if (scatter.value.regression) {
+        const reg = scatter.value.regression;
+        if (reg.line && reg.line.length === 2) {
+          ctx.strokeStyle = '#ff3355'; ctx.lineWidth = 2;
+          ctx.setLineDash([4, 3]);
+          ctx.beginPath();
+          ctx.moveTo(toX(reg.line[0].x), toY(reg.line[0].y));
+          ctx.lineTo(toX(reg.line[1].x), toY(reg.line[1].y));
+          ctx.stroke();
+          ctx.setLineDash([]);
+          // Label the regression line
+          const midX = (reg.line[0].x + reg.line[1].x) / 2;
+          const midY = (reg.line[0].y + reg.line[1].y) / 2;
+          ctx.fillStyle = '#ff3355'; ctx.font = '9px sans-serif'; ctx.textAlign = 'left';
+          ctx.fillText('r²=' + (scatter.value.regression.rSquared || 0).toFixed(3) + '  r=' + (scatter.value.regression.r || 0).toFixed(3), toX(midX) + 4, toY(midY) - 4);
+        }
+      }
+
+      // Axis titles
+      ctx.fillStyle = '#888'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(scatterX.value.toUpperCase(), pad.left + pw/2, h - 2);
+      ctx.save();
+      ctx.translate(10, pad.top + ph/2);
+      ctx.rotate(-Math.PI/2);
+      ctx.fillText(scatterY.value.toUpperCase(), 0, 0);
+      ctx.restore();
+
+      // Equation in corner
+      if (scatter.value.regression) {
+        ctx.fillStyle = '#444'; ctx.font = '9px monospace'; ctx.textAlign = 'right';
+        const eq = scatter.value.regression.slope >= 0
+          ? 'y = ' + scatter.value.regression.slope.toFixed(3) + 'x + ' + scatter.value.regression.intercept.toFixed(2)
+          : 'y = ' + scatter.value.regression.slope.toFixed(3) + 'x + ' + scatter.value.regression.intercept.toFixed(2);
+        ctx.fillText(eq, w - 12, 14);
+        ctx.fillText('r² = ' + (scatter.value.regression.rSquared || 0).toFixed(4) + '  (n=' + scatter.value.n + ')', w - 12, 26);
+      }
     }
 
     async function loadAll() {
-      const p = '?period=' + period.value;
-      const [s, ts, ta, tg, hm, td, obs, rev] = await Promise.all([
-        api('/api/stats'+p), api('/api/top-songs'+p), api('/api/top-artists'+p), api('/api/top-genres'+p),
-        api('/api/heatmap'+p), api('/api/today'), api('/api/obsessions'+p), api('/api/revival'),
+      const q = '?period=' + p.value;
+      const [stats, ts, tg, hm, td, ob, rev2, corrData] = await Promise.all([
+        api('/api/stats'+q), api('/api/top-songs'+q), api('/api/top-genres'+q),
+        api('/api/heatmap'+q), api('/api/today'), api('/api/obsessions'+q), api('/api/revival'),
+        api('/api/correlations'+q),
       ]);
-      if (s) stats.value = s;
-      if (ts) topSongs.value = ts;
-      if (ta) topArtists.value = ta;
-      if (tg) topGenres.value = tg;
-      if (hm) { buildHeatmap(hm.data, hm.todayHourly); processHourly(hm.hourly); }
-      if (td) todaySongs.value = td;
-      if (obs?.obsessions) obsessions.value = obs.obsessions;
-      if (rev?.songs) revival.value = rev.songs;
+      if (stats) s.value = stats;
+      if (ts) topS.value = ts;
+      if (tg) topG.value = tg;
+      if (hm) { buildDayHourMatrix(hm.dayHour); processHourly(hm.hourly); }
+      if (td) today.value = td;
+      if (ob?.obsessions) obs.value = ob.obsessions;
+      if (rev2?.songs) rev.value = rev2.songs;
+      if (corrData) corr.value = corrData;
     }
 
-    async function loadNow() {
-      const n = await api('/api/now');
-      if (n) now.value = n;
-    }
+    async function loadNow() { const x = await api('/api/now'); if (x) n.value = x; }
+    async function loadToday() { const x = await api('/api/today'); if (x) today.value = x; }
+    async function loadFlow(app) { flowApp.value = app; flow.value = await api('/api/flow-profile?app=' + app); }
+    async function loadScatter() { scatter.value = await api('/api/scatter?period=' + p.value + '&x=' + scatterX.value + '&y=' + scatterY.value); if (scatter.value) await nextTick(drawScatter); }
 
-    async function loadToday() {
-      const td = await api('/api/today');
-      if (td) todaySongs.value = td;
-    }
+    function setP(period) { p.value = period; loadAll(); }
 
-    function setPeriod(p) { period.value = p; slide.value = 0; loadAll(); }
-
-    let nowInt, todayInt, hourInt;
+    let nowInt, todayInt, hourInt, resizeTimer;
     onMounted(() => {
-      loadAll(); loadNow();
+      loadAll(); loadNow(); loadFlow('coding'); loadScatter();
       nowInt = setInterval(loadNow, 5000);
       todayInt = setInterval(loadToday, 15000);
-      hourInt = setInterval(() => { currentHour.value = new Date().getHours(); }, 60000);
+      hourInt = setInterval(() => { curHour.value = new Date().getHours(); }, 60000);
+      window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => { if (scatter.value) drawScatter(); }, 200);
+      });
     });
-    onUnmounted(() => { clearInterval(nowInt); clearInterval(todayInt); clearInterval(hourInt); });
+    onUnmounted(() => {
+      clearInterval(nowInt); clearInterval(todayInt); clearInterval(hourInt);
+      window.removeEventListener('resize', () => {});
+    });
+
+    // Sync dot phase to song changes
+    watch(() => n.value.videoId, (id) => { if (id) { beatKey.value++; } });
+
+    // Re-draw scatter + reload when period changes
+    watch(p, () => { loadAll(); setTimeout(loadScatter, 400); });
 
     return {
-      slide, total, period, stats, topSongs, topArtists, topGenres, hourly,
-      hmRows, hmMax, todaySongs, obsessions, revival, now, currentHour,
-      maxGenre, ytThumb, onImgErr, hmClass, loadAll, setPeriod,
+      p, s, topS, topG, hours, dhMatrix, dhMax, dhLabels, dhHoverText, curHour, today, obs, rev, n, dotStyle, beatKey,
+      corr, corrHover, flow, flowApp, scatter, scatterX, scatterY, scatterCanvas, scatterBox, scatterOpts, varDesc,
+      maxGenre, hmCls, dhBg, dhTitle, corrClass, corrBg, fmtR, interpR, setCorrHover, setP, loadFlow, loadScatter, drawScatter,
     };
   },
 }).mount('#app');

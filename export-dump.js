@@ -107,18 +107,22 @@ for (const ld of listenDates) {
 const avgMood = (() => {
   const withEnergy = songs.filter(s => s.energy != null);
   if (!withEnergy.length) return null;
+  const avg = (key) => Math.round(withEnergy.reduce((a, s) => a + (s[key] ?? 0), 0) / withEnergy.length * 100) / 100;
+  const avgE = avg('energy'), avgV = avg('valence');
+  const avgD = avg('danceability'), avgA = avg('acousticness');
+  const avgBpm = withEnergy.reduce((a, s) => a + (s.bpm || 0), 0) / withEnergy.length;
   return {
-    avgEnergy: Math.round(withEnergy.reduce((a, s) => a + s.energy, 0) / withEnergy.length * 100) / 100,
-    avgDanceability: Math.round(withEnergy.reduce((a, s) => a + s.danceability, 0) / withEnergy.length * 100) / 100,
-    avgValence: Math.round(withEnergy.reduce((a, s) => a + s.valence, 0) / withEnergy.length * 100) / 100,
+    avgEnergy: avgE,
+    avgDanceability: avgD,
+    avgValence: avgV,
+    avgAcousticness: avgA,
+    avgBpm: Math.round(avgBpm),
     moodLabel: (() => {
-      const e = withEnergy.reduce((a, s) => a + s.energy, 0) / withEnergy.length;
-      const v = withEnergy.reduce((a, s) => a + s.valence, 0) / withEnergy.length;
-      if (e >= 0.6 && v >= 0.6) return 'energetic & happy';
-      if (e >= 0.6 && v < 0.4) return 'intense / dark';
-      if (e < 0.4 && v >= 0.6) return 'chill & pleasant';
-      if (e < 0.4 && v < 0.4) return 'melancholic / mellow';
-      if (e >= 0.5) return 'moderately energetic';
+      if (avgE >= 0.6 && avgV >= 0.6) return 'energetic & happy';
+      if (avgE >= 0.6 && avgV < 0.4) return 'intense / dark';
+      if (avgE < 0.4 && avgV >= 0.6) return 'chill & pleasant';
+      if (avgE < 0.4 && avgV < 0.4) return 'melancholic / mellow';
+      if (avgE >= 0.5) return 'moderately energetic';
       return 'relaxed';
     })(),
   };
@@ -163,8 +167,16 @@ const dump = {
     album: s.album || null,
     durationSeconds: s.duration || null,
     genre: s.genre || null,
-    bpm: s.bpm || null,
-    ...(s.energy != null ? { mood: { energy: s.energy, danceability: s.danceability, valence: s.valence } } : {}),
+    ...(s.energy != null ? {
+      audioFeatures: {
+        energy: s.energy,
+        danceability: s.danceability,
+        valence: s.valence,
+        bpm: s.bpm,
+        acousticness: s.acousticness,
+      }
+    } : { bpm: s.bpm || null }),
+    popularity: s.spotifyPopularity || null,
     stats: {
       totalPlays: s.playCount,
       ...(s.playsInPeriod ? { playsInPeriod: s.playsInPeriod } : {}),
@@ -203,8 +215,43 @@ const dump = {
 
 if (avgMood) dump.moodProfile = avgMood;
 
+// Audio feature distribution
+const withFeatures = songs.filter(s => s.energy != null);
+if (withFeatures.length > 0) {
+  const fE = withFeatures.map(s => s.energy);
+  const fV = withFeatures.filter(s => s.valence != null).map(s => s.valence);
+  const fD = withFeatures.map(s => s.danceability ?? 0.5);
+  const fB = withFeatures.filter(s => s.bpm != null).map(s => s.bpm);
+  const fA = withFeatures.filter(s => s.acousticness != null).map(s => s.acousticness);
+  const rng = (arr) => arr.length > 1 ? `${Math.min(...arr).toFixed(2)}-${Math.max(...arr).toFixed(2)}` : null;
+
+  // Simple mood clusters
+  const clusters = {
+    energetic: withFeatures.filter(s => s.energy >= 0.7 && (s.valence ?? 0.5) >= 0.5).length,
+    chill: withFeatures.filter(s => s.energy < 0.4 && (s.valence ?? 0.5) >= 0.5).length,
+    melancholic: withFeatures.filter(s => s.energy < 0.4 && (s.valence ?? 0.5) < 0.4).length,
+    intense: withFeatures.filter(s => s.energy >= 0.7 && (s.valence ?? 0.5) < 0.4).length,
+    balanced: withFeatures.filter(s => s.energy >= 0.4 && s.energy < 0.7).length,
+  };
+
+  dump.audioFeatureProfile = {
+    count: withFeatures.length,
+    ranges: {
+      energy: rng(fE),
+      valence: rng(fV),
+      danceability: rng(fD),
+      bpm: rng(fB),
+      acousticness: rng(fA),
+    },
+    clusters,
+    acoustic: withFeatures.filter(s => (s.acousticness ?? 0) > 0.5).length,
+    danceable: withFeatures.filter(s => (s.danceability ?? 0) > 0.5).length,
+  };
+}
+
 fs.writeFileSync(DEST, JSON.stringify(dump, null, 2));
 console.log(`Exported to ${DEST}`);
 console.log(`  ${dump.meta.totalSongs} songs · ${dump.meta.totalListens} listens · ${dump.meta.totalArtists} artists · ${dump.meta.totalGenres} genres`);
-if (dump.moodProfile) console.log(`  Mood profile: ${dump.moodProfile.moodLabel} (e:${dump.moodProfile.avgEnergy} d:${dump.moodProfile.avgDanceability} v:${dump.moodProfile.avgValence})`);
+if (dump.moodProfile) console.log(`  Mood: ${dump.moodProfile.moodLabel} (e:${dump.moodProfile.avgEnergy} d:${dump.moodProfile.avgDanceability} v:${dump.moodProfile.avgValence} a:${dump.moodProfile.avgAcousticness} ${dump.moodProfile.avgBpm}bpm)`);
+if (dump.audioFeatureProfile) console.log(`  Audio features: ${dump.audioFeatureProfile.count} songs · clusters: ${Object.entries(dump.audioFeatureProfile.clusters).filter(([_,v]) => v > 0).map(([k,v]) => `${k}=${v}`).join(' ')}`);
 console.log(`  ${dump.meta.totalListeningTimeMinutes} minutes over ${dump.meta.daysWithActivity} days`);
