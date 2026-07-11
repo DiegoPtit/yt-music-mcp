@@ -29,19 +29,26 @@ function error(res, msg, code) {
   res.end(JSON.stringify({ error: msg }));
 }
 
+function localDateStr(date) {
+  const d = new Date(date);
+  d.setMinutes(d.getMinutes() - 4 * 60);
+  return d.toISOString().split('T')[0];
+}
+
 function parsePeriod(url) {
   const u = new URL(url, 'http://localhost');
   const p = u.searchParams.get('period') || 'week';
   const now = new Date();
   let startDate;
-  if (p === 'today') startDate = now.toISOString().split('T')[0];
+  if (p === 'today') startDate = localDateStr(now);
   else if (p === 'week') {
     const d = new Date(now); d.setDate(d.getDate() - d.getDay());
-    startDate = d.toISOString().split('T')[0];
+    startDate = localDateStr(d);
   } else {
-    startDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    const d = new Date(now); d.setDate(1);
+    startDate = localDateStr(d);
   }
-  const endDate = now.toISOString().split('T')[0];
+  const endDate = localDateStr(now);
   return { period: p, startDate, endDate, daysBack: p === 'today' ? 1 : p === 'week' ? 7 : 30 };
 }
 
@@ -51,7 +58,7 @@ function periodSongs(period) {
     SELECT s.*, COUNT(ld.id) as plays
     FROM songs s
     JOIN listen_dates ld ON s.videoId = ld.videoId
-    WHERE DATE(ld.listenedAt) >= ? AND DATE(ld.listenedAt) <= ?
+    WHERE DATE(ld.listenedAt, '-4 hours') >= ? AND DATE(ld.listenedAt, '-4 hours') <= ?
     GROUP BY s.videoId ORDER BY plays DESC
   `).all(startDate, endDate);
 }
@@ -63,8 +70,8 @@ const router = {
       const songs = periodSongs(p);
       const totalPlays = songs.reduce((a, s) => a + s.plays, 0);
       const totalMinutes = songs.reduce((a, s) => a + (s.duration || 0) * s.plays, 0);
-      const today2 = new Date().toISOString().split('T')[0];
-      const sessionCount = db.getDb().prepare("SELECT COUNT(*) as c FROM sessions WHERE DATE(startTime) = ?").get(today2).c;
+      const today2 = localDateStr(new Date());
+      const sessionCount = db.getDb().prepare("SELECT COUNT(*) as c FROM sessions WHERE DATE(startTime, '-4 hours') = ?").get(today2).c;
       return { totalSongs: songs.length, totalPlays, totalMinutes: Math.round(totalMinutes / 60), likedSongs: 0, daysActive: 1, songsWithBpm: songs.filter(s => s.bpm).length, sessionCount };
     }
     return db.getStats();
@@ -107,10 +114,10 @@ const router = {
 
   '/api/heatmap': (url) => {
     const p = parsePeriod(url);
-    const today = new Date().toISOString().split('T')[0];
+    const today = localDateStr(new Date());
     const todayHourly = db.getDb().prepare(`
-      SELECT CAST(strftime('%H', listenedAt) AS INTEGER) as hour, COUNT(*) as count
-      FROM listen_dates WHERE DATE(listenedAt) = ?
+      SELECT CAST(strftime('%H', listenedAt, '-4 hours') AS INTEGER) as hour, COUNT(*) as count
+      FROM listen_dates WHERE DATE(listenedAt, '-4 hours') = ?
       GROUP BY hour ORDER BY hour
     `).all(today);
     return {
@@ -123,11 +130,11 @@ const router = {
   },
 
   '/api/today': () => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = localDateStr(new Date());
     const songs = db.getDb().prepare(`
       SELECT s.*, COUNT(ld.id) as plays, MAX(ld.listenedAt) as lastListened
       FROM songs s JOIN listen_dates ld ON s.videoId = ld.videoId
-      WHERE DATE(ld.listenedAt) = ?
+      WHERE DATE(ld.listenedAt, '-4 hours') = ?
       GROUP BY s.videoId ORDER BY plays DESC, MAX(ld.listenedAt) DESC
     `).all(today);
     return songs.map(s => ({

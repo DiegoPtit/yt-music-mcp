@@ -278,7 +278,7 @@ function getTimeProfile() {
 
   const byHour = Array.from({ length: 24 }, () => []);
   for (const row of listenDates) {
-    const hour = new Date(row.listenedAt).getHours();
+    const hour = (new Date(row.listenedAt).getHours() - 4 + 24) % 24;
     byHour[hour].push(row);
   }
 

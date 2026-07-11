@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 
 const DB_PATH = `${process.env.HOME}/.var/app/com.github.th_ch.youtube_music/config/YouTube Music/listening-history.db`;
+const TZ = '-4 hours';
 
 let db = null;
 
@@ -264,7 +265,7 @@ function getStats() {
   const totalPlays = d.prepare('SELECT COALESCE(SUM(playCount),0) as c FROM songs').get().c;
   const totalMinutes = d.prepare('SELECT COALESCE(SUM(duration * playCount),0) as c FROM songs WHERE duration IS NOT NULL').get().c;
   const likedSongs = d.prepare("SELECT COUNT(*) as c FROM songs WHERE likeState = 'LIKE'").get().c;
-  const daysActive = d.prepare('SELECT COUNT(DISTINCT DATE(listenedAt)) as c FROM listen_dates').get().c;
+  const daysActive = d.prepare(`SELECT COUNT(DISTINCT DATE(listenedAt, '${TZ}')) as c FROM listen_dates`).get().c;
   const totalBpm = d.prepare('SELECT COUNT(*) as c FROM songs WHERE bpm IS NOT NULL').get().c;
   const spotifyCount = d.prepare('SELECT COUNT(*) as c FROM songs WHERE energy IS NOT NULL').get().c;
   const sessionCount = d.prepare('SELECT COUNT(*) as c FROM sessions').get().c;
@@ -274,17 +275,17 @@ function getStats() {
 
 function getHeatmapData(days = 30) {
   return getDb().prepare(`
-    SELECT DATE(listenedAt) as date, COUNT(*) as count
+    SELECT DATE(listenedAt, '${TZ}') as date, COUNT(*) as count
     FROM listen_dates
-    WHERE listenedAt >= DATE('now', ?)
-    GROUP BY DATE(listenedAt)
+    WHERE listenedAt >= DATE('now', '${TZ}', ?)
+    GROUP BY DATE(listenedAt, '${TZ}')
     ORDER BY date
   `).all(`-${days} days`);
 }
 
 function getHourlyDistribution() {
   return getDb().prepare(`
-    SELECT CAST(strftime('%H', listenedAt) AS INTEGER) as hour, COUNT(*) as count
+    SELECT CAST(strftime('%H', listenedAt, '${TZ}') AS INTEGER) as hour, COUNT(*) as count
     FROM listen_dates
     GROUP BY hour ORDER BY hour
   `).all();
@@ -292,7 +293,7 @@ function getHourlyDistribution() {
 
 function getWeeklyDistribution() {
   return getDb().prepare(`
-    SELECT CAST(strftime('%w', listenedAt) AS INTEGER) as day, COUNT(*) as count
+    SELECT CAST(strftime('%w', listenedAt, '${TZ}') AS INTEGER) as day, COUNT(*) as count
     FROM listen_dates
     GROUP BY day ORDER BY day
   `).all();
@@ -300,11 +301,11 @@ function getWeeklyDistribution() {
 
 function getDayHourMatrix(daysBack = 365) {
   return getDb().prepare(`
-    SELECT CAST(strftime('%w', listenedAt) AS INTEGER) as dow,
-           CAST(strftime('%H', listenedAt) AS INTEGER) as hour,
+    SELECT CAST(strftime('%w', listenedAt, '${TZ}') AS INTEGER) as dow,
+           CAST(strftime('%H', listenedAt, '${TZ}') AS INTEGER) as hour,
            COUNT(*) as count
     FROM listen_dates
-    WHERE listenedAt >= DATE('now', ?)
+    WHERE listenedAt >= DATE('now', '${TZ}', ?)
     GROUP BY dow, hour ORDER BY dow, hour
   `).all(`-${daysBack} days`);
 }
@@ -316,7 +317,7 @@ function getSongsByGenre(genre) {
 function getSongsNotListenedSince(days) {
   return getDb().prepare(`
     SELECT * FROM songs
-    WHERE lastListened < DATE('now', ?)
+    WHERE lastListened < DATE('now', '${TZ}', ?)
     ORDER BY playCount DESC
   `).all(`-${days} days`);
 }
@@ -327,7 +328,7 @@ function getArtistsNotListenedSince(days) {
            MAX(lastListened) as lastListened
     FROM songs
     GROUP BY artist
-    HAVING MAX(lastListened) < DATE('now', ?)
+    HAVING MAX(lastListened) < DATE('now', '${TZ}', ?)
     ORDER BY playCount DESC
   `).all(`-${days} days`);
 }
@@ -337,7 +338,7 @@ function getObsessions(threshold = 3, days = 3) {
     SELECT s.*, COUNT(ld.id) as recentPlays
     FROM songs s
     JOIN listen_dates ld ON s.videoId = ld.videoId
-    WHERE ld.listenedAt >= DATE('now', ?)
+    WHERE ld.listenedAt >= DATE('now', '${TZ}', ?)
     GROUP BY s.videoId
     HAVING recentPlays >= ?
     ORDER BY recentPlays DESC
@@ -732,13 +733,13 @@ function getContextRows(daysBack = 365) {
   return getDb().prepare(`
     SELECT s.bpm, s.energy, s.valence, s.danceability, s.genre,
            ld.keystrokeRate, ld.cpuLoad, ld.memoryUsage, ld.activeApp, ld.weather,
-           CAST(strftime('%H', ld.listenedAt) AS INTEGER) as hour,
-           CAST(strftime('%w', ld.listenedAt) AS INTEGER) as dayOfWeek
+           CAST(strftime('%H', ld.listenedAt, '${TZ}') AS INTEGER) as hour,
+           CAST(strftime('%w', ld.listenedAt, '${TZ}') AS INTEGER) as dayOfWeek
     FROM listen_dates ld
     JOIN songs s ON ld.videoId = s.videoId
     WHERE (ld.keystrokeRate IS NOT NULL OR ld.cpuLoad IS NOT NULL)
       AND s.bpm IS NOT NULL
-      AND ld.listenedAt > DATE('now', ?)
+      AND ld.listenedAt > DATE('now', '${TZ}', ?)
     ORDER BY ld.listenedAt DESC
   `).all(`-${daysBack} days`);
 }
@@ -808,7 +809,7 @@ function getHourProfile(hour) {
     SELECT s.energy, s.valence, s.bpm, s.danceability
     FROM listen_dates ld
     JOIN songs s ON ld.videoId = s.videoId
-    WHERE CAST(strftime('%H', ld.listenedAt) AS INTEGER) = ? AND s.energy IS NOT NULL
+    WHERE CAST(strftime('%H', ld.listenedAt, '${TZ}') AS INTEGER) = ? AND s.energy IS NOT NULL
     ORDER BY ld.listenedAt DESC LIMIT 100
   `).all(hour);
   if (rows.length < 3) return null;
@@ -882,11 +883,11 @@ function getScatterData(metricX, metricY, periodDays = 365) {
   const rows = getDb().prepare(`
     SELECT ${['bpm', 'energy', 'valence', 'danceability'].map(c => `s.${c}`).join(', ')},
            ld.keystrokeRate, ld.cpuLoad, ld.memoryUsage,
-           CAST(strftime('%H', ld.listenedAt) AS INTEGER) as hour
+           CAST(strftime('%H', ld.listenedAt, '${TZ}') AS INTEGER) as hour
     FROM listen_dates ld
     JOIN songs s ON ld.videoId = s.videoId
     WHERE ${isSongMetric ? 's.bpm IS NOT NULL AND' : ''} (ld.cpuLoad IS NOT NULL OR ld.keystrokeRate IS NOT NULL)
-      AND ld.listenedAt > DATE('now', ?)
+      AND ld.listenedAt > DATE('now', '${TZ}', ?)
     ORDER BY ld.listenedAt DESC
   `).all(`-${periodDays} days`);
   const pairs = rows
